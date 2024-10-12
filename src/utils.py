@@ -7,6 +7,7 @@ def exists(val):
     return val is not None
 
 
+
 def get_activation_fn(activation):
     if activation == "relu":
         activation_fn = nn.ReLU

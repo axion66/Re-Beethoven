@@ -1,10 +1,10 @@
-from minLSTMNet import MinLSTM
+from layers.minLSTM_block import MinLSTM
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from utils import *
 from einops import rearrange
-
+from nnAudio.features import MelSpectrogram
 
 
 class PositionalEncoding(nn.Module):
@@ -66,13 +66,13 @@ class series_decomp(nn.Module):
 class diffAttn(nn.Module):
     '''
         a weird combination of iTransformer, DLinear, DiffTransformer, and MinLSTM. 
-    
+        
     '''
     def __init__(self,embed_dim,input_chn,layer_index):
         '''
             mixed diff attention with minLSTM and trend,seasonal decomposition.
         
-            turn [batch,seq,chn] -> [batch,seq,512]
+            turn [batch,seq,chn] -> [batch,seq{->embed_dim},512]
         '''
         super().__init__()
         self.embedding = nn.Linear(input_chn,512)
@@ -82,7 +82,6 @@ class diffAttn(nn.Module):
         self.embed_dim = embed_dim
         self.scale = embed_dim ** -0.25
         self.q12 = MinLSTM(input_size=512,hidden_size=512*2)
-        #self.k12 = nn.Linear(embed_dim, 2*embed_dim, bias=False)
         self.k12 = MinLSTM(input_size=512,hidden_size=512*2)
         self.v = nn.Linear(embed_dim, embed_dim, bias=False)
 
@@ -92,6 +91,10 @@ class diffAttn(nn.Module):
         self.lambda_k2 = nn.Parameter(torch.zeros(self.embed_dim, dtype=torch.float32).normal_(mean=0,std=0.1))
         self.lambda_init = self.set_lambda(torch.Tensor([layer_index])) if layer_index is not None else 0.8
         self.norm = nn.RMSNorm(embed_dim, eps=1e-5, elementwise_affine=False)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False)
+    
+    def set_lambda(self,layer_index):
+        return 0.8 - 0.6* torch.exp(-0.3 * (layer_index))
 
 
     def forward(self,x):
@@ -99,48 +102,34 @@ class diffAttn(nn.Module):
         get x: [batch,seq,chn]
         
         '''
+
         x = self.embedding(x) # [batch,seq,512]
-        #x = self.pos_encoder(x) # [batch,seq,512]
+        return self.attn(x)
+    
+    def attn(self,x):
         trend,seasonal = self.decomposition(x)
-        print(trend.shape)
-        print(seasonal.shape)
-        print("F.shape")
-        # trend: [batch,seq,512], seasonal: [batch,seq,512]
-        print(self.q12(trend)[0].shape)
-        q1,q2 = torch.chunk(self.q12(trend),chunks=2,dim=-1) # batch,chn,seasonal*2
-        k1,k2 = torch.chunk(self.k12(seasonal),chunks=2,dim=-1) # LSTM(stability; merged)
-        
-        v = self.v(x.transpose(-1,-2))
-        print(q1.shape)
-        print(q2.shape)
-        print(k1.shape)
-        print(f"v.shape: {v.shape}")
+        # trend: [batch,seq,512], seasonal: [batch,seq,512] where 512 = d, seq = s
+        q1,q2 = torch.chunk(self.q12(trend),chunks=2,dim=-1) # q1 = b,s,d q2= b,s,d
+        k1,k2 = torch.chunk(self.k12(seasonal),chunks=2,dim=-1) # k1 = b,s,d k2 = b,s,d
+        v = self.v(x.transpose(-1,-2))  # v = b,d,s
+
         attn1 = torch.bmm(q1.transpose(-1,-2),k1) * self.scale # batch,d,d
         attn2 = torch.bmm(q2.transpose(-1,-2),k2) * self.scale # batch,d,d
 
         # from: https://github.com/microsoft/unilm/blob/master/Diff-Transformer/multihead_diffattn.py#L23
+        
+        difference = F.softmax(attn1,dim=-1) - self.get_lambda() * F.softmax(attn2,dim=-1) # b,d,d
+        attn =  torch.bmm(difference,v) # b,d,s
+        attn = self.norm(attn) # b,d,s
+        attn *= (1 - self.lambda_init) # b,s,d
+        return self.out_proj(attn).transpose(-1,-2) # b,s,d
+
+    def get_lambda(self):
         lambda_1 = torch.exp(torch.sum(self.lambda_q1 * self.lambda_k1, dim=-1).float())
         lambda_2 = torch.exp(torch.sum(self.lambda_q2 * self.lambda_k2, dim=-1).float())
         lambda_full = lambda_1 - lambda_2 + self.lambda_init
-
-        difference = F.softmax(attn1,dim=-1) - lambda_full * F.softmax(attn2,dim=-1)
-        print(difference.shape)
-        print(v.shape)
-        qkv =  torch.bmm(difference,v) # b,d,s
-        x = self.norm(qkv) 
-        qkv = qkv.transpose(-1,-2) # b,s,d
-
-        
-        x *= (1 - self.lambda_init)
-        return x
-
-    def set_lambda(self,layer_index):
-        return 0.8 - 0.6* torch.exp(-0.3 * (layer_index))
-
-  
+        return lambda_full
     
-
-
 class VAE_temporal(nn.Module):
 
     def __init__(self,num_blocks,activation) -> None:
@@ -166,3 +155,59 @@ class VAE_temporal(nn.Module):
 
     def kl(self,):
         pass
+
+N_FFT = 2048
+HOP_LENGTH = 1024
+CHUNK_LENGTH = 30
+N_MELS = 64
+SR = 8000
+class net(nn.Module):
+   
+    def __init__(self,sequence_length,num_blocks,activation) -> None:
+        super().__init__()
+        self.sequence_length = sequence_length  
+        self.spectrogram = MelSpectrogram(sr=SR,n_fft=N_FFT,win_length=N_FFT,n_mels=N_MELS,hop_length=HOP_LENGTH,trainable_mel=True,trainable_STFT=True,htk=True,fmin=1e-7)
+
+        self.shape_spectrogram:tuple = self.calculate_spectrogram_shape(sequence_length)
+
+        self.num_blocks = num_blocks
+        self.activation_fn = get_activation_fn(activation)
+        
+        self.enc_blocks = nn.ModuleList([])
+        self.dec_blocks = nn.ModuleList([])
+
+        self.enc_blocks.append(diffAttn(embed_dim=self.shape_spectrogram[1],input_chn=self.shape_spectrogram[0],layer_index=1))
+        for i in range(num_blocks-1):
+            self.enc_blocks.append(diffAttn(embed_dim=self.shape_spectrogram[1],input_chn=512,layer_index=i+2))
+        
+        for i in range(num_blocks):
+            self.dec_blocks.append(diffAttn(embed_dim=self.shape_spectrogram[1],input_chn=512,layer_index=i+1))
+        
+        self.proj = nn.Sequential(
+            nn.Flatten(start_dim=1,end_dim=-1),
+            nn.Linear(self.shape_spectrogram[1] * 512, sequence_length // 4),
+            self.activation_fn(),
+            nn.Linear(sequence_length//4,sequence_length)
+        )
+    def calculate_spectrogram_shape(self,sequence_length):
+        # Calculate the number of frames (time dimension)
+        with torch.no_grad():
+            out =self.spectrogram(torch.ones((1,1,sequence_length)))
+            return out.shape[1],out.shape[2]
+
+    def forward(self,x): 
+        '''
+            input x: [batch,1,seq]
+        '''
+        x = self.spectrogram(x) # batch,n_mels,num_frames
+        x = x.transpose(-1,-2) # batch,seq_len,n_mels
+
+        for block in self.enc_blocks:
+            x = block(x)
+
+        
+        for block in self.dec_blocks:
+            x = block(x)
+
+
+        return self.proj(x)# b,seq
