@@ -156,7 +156,7 @@ class PositionwiseFeedForward(nn.Sequential):
         super().__init__(
             nn.Linear(dims, dims * rate),
             nn.SiLU(),
-            nn.Dropout(dropout),
+            nn.AlphaDropout(dropout),
             nn.Linear(dims * rate, dims))
         
 class diffAttn(nn.Module):
