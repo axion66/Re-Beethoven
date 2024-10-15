@@ -10,12 +10,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-
-N_FFT = 2048
-HOP_LENGTH = 512
+# config
+SR = 8000
+N_FFT = 512
+WIN_LEN = 512
+HOP_LENGTH = 256
 CHUNK_LENGTH = 30
 N_MELS = 64
-SR = 8000
+MIN=1e-7
+MAX=2e+5
 
 # default sampling rate for piano. not even close w/ Nyquist[44100Khz]
 '''
@@ -59,7 +62,7 @@ def load_audio(filepath:str):
     waveform, sr = torchaudio.load(filepath)
     waveform = stereo_to_mono(waveform,dim=-1)
     waveform = resample(waveform,sr,SR)
-    waveform = divide(waveform,n=N_FFT,cut_firstlast_n=int(SR*0.1))
+    waveform = divide(waveform,n=HOP_LENGTH,cut_firstlast_n=int(SR*0.1))
     return waveform
 
 def load_mp3_files(base_folder:str):
@@ -94,7 +97,7 @@ def create_overlapping_chunks_tensor(sequence: torch.Tensor, chunk_len: int) -> 
     
     # Calculate the number of chunks
     sequence_length = sequence.shape[0]
-    step_size = chunk_len // 2  # Overlapping by half
+    step_size = chunk_len // 8  # Overlapping by 7/8
     num_chunks = (sequence_length - chunk_len) // step_size + 1
     
     # Create a tensor to hold the chunks

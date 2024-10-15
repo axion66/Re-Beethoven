@@ -11,7 +11,7 @@ def exists(val):
 def get_activation_fn(activation):
     if activation == "relu":
         activation_fn = nn.ReLU
-    elif activation == "swish":
+    elif activation == "silu":
         activation_fn = nn.SiLU
     else:
         raise NotImplementedError

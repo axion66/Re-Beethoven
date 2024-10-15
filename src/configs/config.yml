@@ -1,0 +1,13 @@
+model_param:
+  # for generator part
+  n_fft: 80
+  win_len: 80
+  hop_length: 40
+  chunk_size: 30
+  n_mels: 64
+  sr: 8000
+  gradient_min: 1e-7
+  gradient_max: 2e+5
+  device: "cuda"
+  epochs: 50
+  batch_size: 1
