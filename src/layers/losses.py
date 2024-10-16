@@ -4,14 +4,13 @@ import torch.nn.functional as F
 import torchaudio
 # config
 SR = 8000
-N_FFT = 512
-WIN_LEN = 512
-HOP_LENGTH = 256
+N_FFT = 128
+WIN_LEN = 128
+HOP_LENGTH = 64
 CHUNK_LENGTH = 30
 N_MELS = 64
 MIN=1e-7
 MAX=2e+5
-
 def stft(x, fft_size, hop_size, win_size, window):
     # do stft and gets magnitude
     x_stft = torch.stft(x, fft_size, hop_size, win_size, window,return_complex=True)

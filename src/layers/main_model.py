@@ -9,9 +9,9 @@ from layers.util_net import RMSNorm,decompose,PositionwiseFeedForward,TorchSTFT
 
 # config
 SR = 8000
-N_FFT = 512
-WIN_LEN = 512
-HOP_LENGTH = 256
+N_FFT = 128
+WIN_LEN = 128
+HOP_LENGTH = 64
 CHUNK_LENGTH = 30
 N_MELS = 64
 MIN=1e-7

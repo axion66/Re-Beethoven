@@ -7,14 +7,13 @@ from scipy.signal import get_window
 
 # config
 SR = 8000
-N_FFT = 512
-WIN_LEN = 512
-HOP_LENGTH = 256
+N_FFT = 128
+WIN_LEN = 128
+HOP_LENGTH = 64
 CHUNK_LENGTH = 30
 N_MELS = 64
 MIN=1e-7
 MAX=2e+5
-
 class TorchSTFT(nn.Module):
     # from: https://github.com/yl4579/StyleTTS2/blob/main/Modules/istftnet.py#L456
     def __init__(self):
