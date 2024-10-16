@@ -14,6 +14,8 @@ CHUNK_LENGTH = 30
 N_MELS = 64
 MIN=1e-7
 MAX=2e+5
+
+
 class TorchSTFT(nn.Module):
     # from: https://github.com/yl4579/StyleTTS2/blob/main/Modules/istftnet.py#L456
     def __init__(self):
@@ -92,60 +94,8 @@ class RMSNorm(nn.Module):
             return self.scale * x_normed + self.offset
 
         return self.scale * x_normed
-        
-class PositionalEncoding(nn.Module):
 
-    def __init__(self, d_model, max_len=5000):
-        super(PositionalEncoding, self).__init__()       
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        # div_term = torch.exp(
-        #     torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model)
-        # )
-        div_term = 1 / (10000 ** ((2 * np.arange(d_model)) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term[0::2])
-        pe[:, 1::2] = torch.cos(position * div_term[1::2])
-
-        pe = pe.unsqueeze(0).transpose(0, 1) # [5000, 1, d_model],so need seq-len <= 5000
-        #pe.requires_grad = False
-        self.register_buffer('pe', pe)
-
-    def forward(self, x):
-        # print(self.pe[:x.size(0), :].repeat(1,x.shape[1],1).shape ,'---',x.shape)
-        # dimension 1 maybe inequal batchsize
-        return x + self.pe[:x.size(0), :].repeat(1,x.shape[1],1)
-        
     
-class moving_avg(nn.Module):
-    # maybe trying EMA or WMA also good idea, but computation should be handled on the CPU.
-    def __init__(self, kernel_size, stride):
-        #kernel_size recommend [5,20,40,120]
-        super(moving_avg, self).__init__()
-        self.kernel_size = kernel_size
-        self.avg = torch.nn.AvgPool1d(kernel_size=kernel_size, stride=stride, padding=0)
-
-    def forward(self, x):
-        '''
-            x: [batch,len,chn]
-        '''
-        front = x[:, 0:1, :].repeat(1, (self.kernel_size - 1) // 2, 1)
-        end = x[:, -1:, :].repeat(1, (self.kernel_size - 1) // 2, 1)
-        x = torch.cat([front, x, end], dim=1)
-        x = self.avg(x.permute(0, 2, 1))
-        x = x.permute(0, 2, 1)
-        return x
-
-class decompose(nn.Module):
-    def __init__(self, kernel_size):
-        super().__init__()
-        self.moving_avg = moving_avg(kernel_size, stride=1)
-        
-    def forward(self, x):
-        moving_mean = self.moving_avg(x)
-        residual = x - moving_mean
-        return moving_mean, residual 
-        
-        
 class PositionwiseFeedForward(nn.Sequential):
     # from: https://github.com/affjljoo3581/GPT2/tree/master
     """
@@ -156,7 +106,7 @@ class PositionwiseFeedForward(nn.Sequential):
     output          float           (..., dims)
     ===========================================================================
     """
-    def __init__(self, dims: int, rate: int = 4, dropout: float = 0.1):
+    def __init__(self, dims: int, rate: int = 4, dropout: float = 0.2):
         super().__init__(
             nn.Linear(dims, dims * rate),
             nn.SiLU(),

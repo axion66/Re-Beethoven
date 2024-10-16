@@ -3,3 +3,4 @@ torchaudio
 torch=2.4
 nnAudio
 scipy
+rotary-embedding-torch

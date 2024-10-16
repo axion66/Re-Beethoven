@@ -1,2 +1,2 @@
-models/*
+/src/models/*
 */__pycache__/
