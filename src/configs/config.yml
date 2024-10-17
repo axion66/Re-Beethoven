@@ -11,3 +11,5 @@ model_param:
   device: "cuda"
   epochs: 50
   batch_size: 1
+  seq_len: 5120
+  num_blocks: 10
