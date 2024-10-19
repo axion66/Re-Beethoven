@@ -63,7 +63,7 @@ def load_audio(filepath:str):
     waveform = stereo_to_mono(waveform,dim=-1)
     waveform = resample(waveform,sr,SR)
     waveform = divide(waveform,n=HOP_LENGTH,cut_firstlast_n=int(SR*0.1))
-    return waveform
+    return waveform, SR
 
 def load_mp3_files(base_folder:str):
     audio_tensors = []
