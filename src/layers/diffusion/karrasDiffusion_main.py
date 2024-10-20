@@ -68,14 +68,18 @@ class Denoiser(nn.Module):
         # lambda(sigma)
         return (sigmas ** 2 + self.sigma_data ** 2) / (sigmas * self.sigma_data) ** 2
 
-    def forward(self, x: Tensor, noise: Tensor = None, **kwargs) -> Tensor:
+    def forward(self, x: Tensor, **kwargs) -> Tensor:
         # TODO: seperate calculating loss and forward method
         b, device = x.shape[0], x.device
         sigmas = self.get_noise(num_samples=b, device=device)
         sigmas_padded = rearrange(sigmas, "b -> b 1 1")
-        noise = noise if exists(noise) else torch.randn_like(x)
+        noise = torch.randn_like(x)
         x_noisy = x + sigmas_padded * noise
         x_denoised = self.denoise_fn(x_noisy, sigmas=sigmas, **kwargs)
+        
+        return x_denoised,sigmas
+
+    def calculate_loss(self,x:Tensor,x_denoised:Tensor,sigmas:Tensor):
         losses = F.mse_loss(x_denoised, x, reduction="none")
         losses = reduce(losses, "b ... -> b", "mean")
         losses *= self.loss_weighting(sigmas)

@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utils import *
 from layers.util_net import RMSNorm,PositionwiseFeedForward,TorchSTFT
 from layers.attentionBlock import TransformerBlock
 #from nnAudio.features import MelSpectrogram,STFT,iSTFT# instead, use TorchSTFT class.
@@ -59,9 +58,10 @@ class CNNEncoder(nn.Module):
     turn freq_bins into latent vectors.
     """
     def __init__(self,channels:list,):
+        super().__init__()
         self.blocks = nn.ModuleList([])
 
-        for i in range(channels - 1):
+        for i in range(len(channels) - 1):
             self.blocks.append(ConvBlock(in_channels=channels[i],out_channels=channels[i + 1],p=0.2))
 
         
@@ -115,8 +115,10 @@ class CNNDecoder(nn.Module):
 
 class net(nn.Module):
    
-    def __init__(self,sequence_length,num_blocks):
+    def __init__(self,config):
         super().__init__()
+        sequence_length = config['seq_len'] 
+        num_blocks = config['num_blocks']
         self.sequence_length = sequence_length  
         self.stft = TorchSTFT()
         self.seq_len,self.embed_dim = self.calculate_spectrogram_shape(sequence_length)

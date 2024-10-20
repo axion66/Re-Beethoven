@@ -10,29 +10,30 @@ SR = 8000
 N_FFT = 128
 WIN_LEN = 128
 HOP_LENGTH = 64
-CHUNK_LENGTH = 30
-N_MELS = 64
-MIN=1e-7
-MAX=2e+5
+
 
 
 class TorchSTFT(nn.Module):
     # from: https://github.com/yl4579/StyleTTS2/blob/main/Modules/istftnet.py#L456
-    def __init__(self):
+    def __init__(self,config):
         super().__init__()
-        self.filter_length = N_FFT
-        self.hop_length = HOP_LENGTH
-        self.win_length = WIN_LEN
-        self.window = torch.from_numpy(get_window('hann', WIN_LEN, fftbins=True).astype(np.float32))
+        self.filter_length = config['n_fft']
+        self.hop_length = config['hop_length']
+        self.win_length = config['win_len']
+
+        self.window = torch.from_numpy(get_window('hann', config['win_len'], fftbins=True).astype(np.float32))
 
     def transform(self, input_data):
-        # input data has to be 1D or 2D [L] or [Batch, L]. no [Batch,1,L]
+        if input_data.dim() == 3 and input_data.size(1) == 1:
+            input_data.squeeze(1) 
+        
         forward_transform = torch.stft(
             input_data,
             self.filter_length, self.hop_length, self.win_length, window=self.window.to(input_data.device),
             return_complex=True)
 
-        return torch.abs(forward_transform), torch.angle(forward_transform) # mag & phase. phase is being used but maybe tough for the model to learn, but essential for high quality.
+        return torch.abs(forward_transform), torch.angle(forward_transform) 
+        # mag & phase. phase is being used but maybe tough for the model to learn, but essential for high quality.
 
     def inverse(self, magnitude, phase):
 
@@ -43,6 +44,7 @@ class TorchSTFT(nn.Module):
             self.filter_length, self.hop_length, self.win_length, window=self.window.to(magnitude.device))
 
         return inverse_transform
+    
     def forward(self, input_data):
         self.magnitude, self.phase = self.transform(input_data)
 
@@ -97,15 +99,7 @@ class RMSNorm(nn.Module):
 
     
 class PositionwiseFeedForward(nn.Sequential):
-    # from: https://github.com/affjljoo3581/GPT2/tree/master
-    """
-    Tensor          Type            Shape
-    ===========================================================================
-    input           float           (..., dims)
-    ---------------------------------------------------------------------------
-    output          float           (..., dims)
-    ===========================================================================
-    """
+
     def __init__(self, dims: int, rate: int = 4, dropout: float = 0.2):
         super().__init__(
             nn.Linear(dims, dims * rate),

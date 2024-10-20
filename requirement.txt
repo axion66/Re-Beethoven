@@ -1,6 +1,5 @@
-mamba-ssm
 torchaudio
-torch=2.4
+torch==2.4
 scipy
 rotary-embedding-torch
 flash-attn

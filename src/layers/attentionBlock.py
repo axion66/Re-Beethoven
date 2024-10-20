@@ -2,9 +2,9 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from flash_attn import flash_attn_func #pip install flash-attn --no-build-isolation
+#from flash_attn import flash_attn_func #pip install flash-attn --no-build-isolation
 from rotary_embedding_torch import RotaryEmbedding
-from util_net import RMSNorm,PositionwiseFeedForward
+from layers.utils import RMSNorm,PositionwiseFeedForward
 
 class MultiheadFlashDiff(nn.Module):
     # https://github.com/microsoft/unilm/blob/master/Diff-Transformer/multihead_flashdiff_1.py
@@ -18,7 +18,6 @@ class MultiheadFlashDiff(nn.Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads 
         self.head_dim = embed_dim // num_heads // 2
-        self.scaling = self.head_dim ** -0.25
         
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False)
         self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False)
@@ -47,7 +46,7 @@ class MultiheadFlashDiff(nn.Module):
 
         q = q.view(b, seq_len, 2 * self.num_heads, self.head_dim)
         k = k.view(b, seq_len, 2 * self.num_heads, self.head_dim)
-        v = v.view(b, seq_len, self.num_heads, 2 * self.head_dim)
+        v = v.view(b, seq_len, self.num_heads, 2, self.head_dim)
 
         q = self.rotary.rotate_queries_or_keys(q)
         k = self.rotary.rotate_queries_or_keys(k)
@@ -56,24 +55,58 @@ class MultiheadFlashDiff(nn.Module):
         k = k.reshape(b, seq_len, self.num_heads, 2, self.head_dim)
         q1, q2 = q[:, :, :, 0], q[:, :, :, 1] # same as q[:,:,:,0,:].squeeze(-1). it's correct!
         k1, k2 = k[:, :, :, 0], k[:, :, :, 1]
-        attn1 = flash_attn_func(q1, k1, v, causal=True)
-        attn2 = flash_attn_func(q2, k2, v, causal=True)
+        v1, v2 = v[:, :, :, 0], v[:, :, :, 1]
+        attn1 = self.scaled_dot_product_attention(q,k,v)#flash_attn_func(q1, k1, v1, causal=True)
+        attn2 = self.scaled_dot_product_attention(q2, k2, v2)#flash_attn_func(q2, k2, v2, causal=True)
         
         
-        attn = self.ln(attn1 - self.get_lambda() * attn2)
+        attn = self.ln(attn1 - self.get_lambda(q) * attn2)
         attn = attn * (1 - self.lambda_init)
         attn = attn.reshape(b, seq_len, self.embed_dim)
         attn = self.out_proj(attn)
 
         return attn
     
-    def get_lambda(self,):
+    def get_lambda(self,q):
         lambda_1 = torch.exp(torch.sum(self.lambda_q1 * self.lambda_k1, dim=-1).float()).type_as(q)
         lambda_2 = torch.exp(torch.sum(self.lambda_q2 * self.lambda_k2, dim=-1).float()).type_as(q)
         lambda_full = lambda_1 - lambda_2 + self.lambda_init
         return lambda_full
 
-
+    def scaled_dot_product_attention(self,q, k, v, mask=None, dropout_p=0.0):
+        """
+        Compute scaled dot-product attention
+        
+        Args:
+        q, k, v: query, key, and value tensors. 
+                Each has shape (batch, sequence, num_head, head_dim)
+        mask: Optional mask tensor with shape (batch, num_head, sequence, sequence)
+        dropout_p: Dropout probability
+        
+        Returns:
+        output: Attention output with shape (batch, sequence, num_head, head_dim)
+        attention_weights: Attention weights with shape (batch, num_head, sequence, sequence)
+        """
+        batch, seq_len, num_head, head_dim = q.shape
+        
+        # Transpose to (batch, num_head, sequence, head_dim)
+        q = q.transpose(1, 2)
+        k = k.transpose(1, 2)
+        v = v.transpose(1, 2)
+        
+        attn_scores = torch.matmul(q, k.transpose(-2, -1)) * (head_dim ** -0.25)
+        
+        if mask is not None:
+            attn_scores = attn_scores.masked_fill(mask == 0, float('-inf'))
+        attn_weights = F.softmax(attn_scores, dim=-1)
+        if (dropout_p != 0.0):
+            attn_weights = F.dropout(attn_weights, p=dropout_p)
+        
+        output = torch.matmul(attn_weights, v)
+        
+        output = output.transpose(1, 2)
+        
+        return output #, attn_weights
 
 
 
