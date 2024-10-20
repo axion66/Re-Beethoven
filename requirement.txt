@@ -4,3 +4,6 @@ scipy
 rotary-embedding-torch
 flash-attn
 einops
+wandb
+matplotlib
+soundfile

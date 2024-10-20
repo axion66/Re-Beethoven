@@ -14,7 +14,6 @@ import soundfile as sf  # For saving audio files
 from tqdm import tqdm
 import argparse
 
-SR = 8000
 
 
 class Trainer:
@@ -24,8 +23,8 @@ class Trainer:
         self.model_param = self.cfg['model_param']
         self.file_path = self.cfg['file_path']
 
-        self.net = net(self.model_param)
-        self.model = Denoiser(model=self.net, sigma_data=0.5)
+        self.net = net(self.fft_setup)
+        self.model = Denoiser(model=self.net, sigma_data=0.5).to(self.model_param['device'])
         self.model_optimizer = Adam(self.model.parameters(), lr=self.model_param['lr'], betas=(0.9, 0.95), weight_decay=0.1)
 
         self.train_losses = []
@@ -43,6 +42,7 @@ class Trainer:
             },
             name=f"run_{current_time}"
         )
+
 
         # Initialize sampler and scheduler
         self.sampler = KarrasSampler()
@@ -68,7 +68,7 @@ class Trainer:
 
             for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{EPOCH}")):
                 self.model_optimizer.zero_grad()
-
+                x = x[0].to(self.model_param['device'])
                 x_denoised, sigmas = self.model(x)
                 loss = self.model.calculate_loss(x, x_denoised, sigmas)
                 loss.backward()
@@ -127,7 +127,7 @@ class Trainer:
         plt.close()
 
     def get_loader(self):
-        tensors, sr = load_mp3_files(self.file_path['audio_folder'],self.fft_setup)
+        tensors = load_mp3_files(self.file_path['audio_folder'],self.fft_setup)
         tensors = torch.cat(tensors, dim=-1)
 
         x = create_overlapping_chunks_tensor(tensors, self.fft_setup)

@@ -43,7 +43,7 @@ class Denoiser(nn.Module):
 
     def get_scaling(self, sigmas: Tensor):
         # network and preconditioning
-        sigmas = rearrange(sigmas, "b -> b 1 1")
+        sigmas = rearrange(sigmas, "b -> b 1")
         c_common = sigmas**2 + self.sigma_data**2 # sig**2 + sig_data**2
         c_skip = (self.sigma_data ** 2) / c_common # c_skip
         c_out = sigmas * self.sigma_data / (c_common ** 0.5) # c_out
@@ -58,8 +58,8 @@ class Denoiser(nn.Module):
         **kwargs,
     ) -> Tensor:
 
-        c_skip, c_out, c_in, c_noise = self.get_scaling(sigmas)
-        x_pred = self.model(c_in * x_noisy, c_noise, **kwargs)
+        c_skip, c_out, c_in, _ = self.get_scaling(sigmas)
+        x_pred = self.model(c_in * x_noisy, sigmas)
         x_denoised = c_skip * x_noisy + c_out * x_pred
 
         return x_denoised
@@ -68,14 +68,14 @@ class Denoiser(nn.Module):
         # lambda(sigma)
         return (sigmas ** 2 + self.sigma_data ** 2) / (sigmas * self.sigma_data) ** 2
 
-    def forward(self, x: Tensor, **kwargs) -> Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         # TODO: seperate calculating loss and forward method
         b, device = x.shape[0], x.device
         sigmas = self.get_noise(num_samples=b, device=device)
         sigmas_padded = rearrange(sigmas, "b -> b 1 1")
         noise = torch.randn_like(x)
-        x_noisy = x + sigmas_padded * noise
-        x_denoised = self.denoise_fn(x_noisy, sigmas=sigmas, **kwargs)
+        x_noisy = x + sigmas_padded.squeeze(1) * noise
+        x_denoised = self.denoise_fn(x_noisy, sigmas=sigmas)
         
         return x_denoised,sigmas
 

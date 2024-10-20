@@ -31,7 +31,7 @@ class MultiheadFlashDiff(nn.Module):
         self.lambda_k2 = nn.Parameter(torch.zeros(self.head_dim, dtype=torch.float32).normal_(mean=0,std=0.1))
 
         self.ln = RMSNorm(2 * self.head_dim, eps=1e-8,bias=True)
-        self.rotary = RotaryEmbedding(dim=self.head_dim,seq_before_head_dim=True,freqs_for='lang',interpolate_factor=1,cache_if_possible=True,use_xpos=True)
+        self.rotary = RotaryEmbedding(dim=self.head_dim,seq_before_head_dim=True,freqs_for='lang',interpolate_factor=1,cache_if_possible=True,use_xpos=False)
         # seq_before_head_dim = False sets seq_dim as -2, not -3.
         
     def forward(
@@ -53,13 +53,12 @@ class MultiheadFlashDiff(nn.Module):
 
         q = q.reshape(b, seq_len, self.num_heads, 2, self.head_dim)
         k = k.reshape(b, seq_len, self.num_heads, 2, self.head_dim)
-        q1, q2 = q[:, :, :, 0], q[:, :, :, 1] # same as q[:,:,:,0,:].squeeze(-1). it's correct!
+        q1, q2 = q[:, :, :, 0], q[:, :, :, 1] # same as q[:,:,:,0,:].squeeze(-2). it's correct!
         k1, k2 = k[:, :, :, 0], k[:, :, :, 1]
         v1, v2 = v[:, :, :, 0], v[:, :, :, 1]
-        attn1 = self.scaled_dot_product_attention(q,k,v)#flash_attn_func(q1, k1, v1, causal=True)
+        attn1 = self.scaled_dot_product_attention(q1,k1,v1)#flash_attn_func(q1, k1, v1, causal=True)
         attn2 = self.scaled_dot_product_attention(q2, k2, v2)#flash_attn_func(q2, k2, v2, causal=True)
-        
-        
+    
         attn = self.ln(attn1 - self.get_lambda(q) * attn2)
         attn = attn * (1 - self.lambda_init)
         attn = attn.reshape(b, seq_len, self.embed_dim)
@@ -73,41 +72,36 @@ class MultiheadFlashDiff(nn.Module):
         lambda_full = lambda_1 - lambda_2 + self.lambda_init
         return lambda_full
 
-    def scaled_dot_product_attention(self,q, k, v, mask=None, dropout_p=0.0):
+    def scaled_dot_product_attention(self, q, k, v, mask=None):
         """
-        Compute scaled dot-product attention
-        
-        Args:
-        q, k, v: query, key, and value tensors. 
-                Each has shape (batch, sequence, num_head, head_dim)
-        mask: Optional mask tensor with shape (batch, num_head, sequence, sequence)
-        dropout_p: Dropout probability
-        
-        Returns:
-        output: Attention output with shape (batch, sequence, num_head, head_dim)
-        attention_weights: Attention weights with shape (batch, num_head, sequence, sequence)
-        """
-        batch, seq_len, num_head, head_dim = q.shape
-        
-        # Transpose to (batch, num_head, sequence, head_dim)
-        q = q.transpose(1, 2)
-        k = k.transpose(1, 2)
-        v = v.transpose(1, 2)
-        
-        attn_scores = torch.matmul(q, k.transpose(-2, -1)) * (head_dim ** -0.25)
-        
-        if mask is not None:
-            attn_scores = attn_scores.masked_fill(mask == 0, float('-inf'))
-        attn_weights = F.softmax(attn_scores, dim=-1)
-        if (dropout_p != 0.0):
-            attn_weights = F.dropout(attn_weights, p=dropout_p)
-        
-        output = torch.matmul(attn_weights, v)
-        
-        output = output.transpose(1, 2)
-        
-        return output #, attn_weights
+        Compute the scaled dot-product attention.
 
+        Args:
+            q: Query tensor of shape (batch_size, seq_len, num_heads, head_dim)
+            k: Key tensor of shape (batch_size, seq_len, num_heads, head_dim)
+            v: Value tensor of shape (batch_size, seq_len, num_heads, head_dim)
+            mask: Optional mask tensor of shape (batch_size, 1, 1, seq_len)
+
+        Returns:
+            output: Attention output tensor of shape (batch_size, seq_len, num_heads, head_dim)
+            attention_weights: Attention weights tensor of shape (batch_size, num_heads, seq_len, seq_len)
+        """
+        # Calculate the attention scores
+        scores = torch.matmul(q, k.transpose(-2, -1))  # Shape: (batch_size, seq_len, num_heads, seq_len)
+        scaling_factor = self.head_dim ** 0.25
+        scores = scores / scaling_factor
+
+        # Apply the mask (if provided)
+        if mask is not None:
+            scores = scores.masked_fill(mask == 0, float('-inf'))
+
+        # Compute the attention weights
+        attention_weights = F.softmax(scores, dim=-1)  # Shape: (batch_size, seq_len, num_heads, seq_len)
+
+        # Compute the attention output
+        output = torch.matmul(attention_weights, v)  # Shape: (batch_size, seq_len, num_heads, head_dim)
+
+        return output
 
 
 class TransformerBlock(nn.Module):
