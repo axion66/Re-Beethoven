@@ -81,20 +81,31 @@ class Trainer:
             self.train_losses.append(avg_train_loss)
 
             # Log training loss to wandb
-            wandb.log({"train_loss": avg_train_loss, "epoch": epoch + 1})
+            wandb.log({"train_loss": avg_train_loss})
 
             print(f"Epoch {epoch+1}/{EPOCH}, Average Train Loss: {avg_train_loss:.4f}")
 
-            # Evaluate the model every 20 epochs
+            # Evaluate the model and generate samples every 20 epochs
             if (epoch + 1) % 20 == 0:
                 eval_loss = self.evaluate(self.test_loader)
                 self.eval_losses.append(eval_loss)
-                wandb.log({"eval_loss": eval_loss, "epoch": epoch + 1})
+                wandb.log({"eval_loss": eval_loss})
                 print(f"Evaluation Loss: {eval_loss:.4f}")
 
                 if eval_loss < self.best_eval_loss:
                     self.best_eval_loss = eval_loss
                     torch.save(self.model.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
+
+                # Generate samples
+                num_samples = 5  # You can adjust this number
+                num_steps = 1000  # You can adjust this number
+                samples_dir = os.path.join(LOG_DIR, f"samples_epoch_{epoch+1}")
+                self.generate_samples(num_samples, num_steps, samples_dir)
+
+                # Log sample audio to wandb
+                for i in range(num_samples):
+                    sample_path = os.path.join(samples_dir, f"sample_{i}.wav")
+                    wandb.log({f"audio_sample_{i}": wandb.Audio(sample_path, sample_rate=self.fft_setup['sr'])})
 
             # Plot and save loss curves
             self.plot_losses(LOG_DIR)
@@ -105,6 +116,7 @@ class Trainer:
         total_loss = 0
         with torch.no_grad():
             for x in test_loader:
+                x = x[0].to(self.model_param['device']) # list to TEnsor
                 x_denoised, sigmas = self.model(x)
                 loss = self.model.calculate_loss(x, x_denoised, sigmas)
                 total_loss += loss.item()
@@ -115,7 +127,7 @@ class Trainer:
         plt.plot(self.train_losses, label='Train Loss', color='blue')
 
         if self.eval_losses:  # Check if there are any eval losses
-            eval_x = range(0, len(self.eval_losses) * self.eval_frequency, self.eval_frequency)
+            eval_x = range(0, len(self.eval_losses) * 20, 20)
             plt.plot(eval_x, self.eval_losses, label='Eval Loss', color='orange', marker='o')
 
         plt.xlabel('Epochs')
@@ -148,12 +160,12 @@ class Trainer:
 
 
     def generate_samples(self, num_samples: int, num_steps: int, output_dir: str) -> None:
-        audio_path = os.path.join(output_dir, "samples")
+        audio_path = output_dir
         os.makedirs(audio_path, exist_ok=True)
 
-        noise = torch.randn(num_samples, 1, self.fft_setup['seq_len']).to(self.model.device) 
-        sigmas = self.scheduler(num_steps=num_steps, device=self.model.device)
-
+        noise = torch.randn(num_samples, self.fft_setup['seq_len']).to(self.model_param['device']) 
+        sigmas = self.scheduler(num_steps=num_steps, device=self.model_param['device'])
+   
         with torch.no_grad():
             generated_samples = self.sampler(noise, model=self.model, sigmas=sigmas, num_steps=num_steps)
 

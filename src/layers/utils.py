@@ -5,12 +5,6 @@ import numpy as np
 from einops import rearrange
 from scipy.signal import get_window
 
-# config
-SR = 8000
-N_FFT = 128
-WIN_LEN = 128
-HOP_LENGTH = 64
-
 
 
 class TorchSTFT(nn.Module):

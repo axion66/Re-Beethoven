@@ -55,11 +55,11 @@ class Denoiser(nn.Module):
         self,
         x_noisy: Tensor,
         sigmas: Tensor,
-        **kwargs,
     ) -> Tensor:
-
+        
         c_skip, c_out, c_in, _ = self.get_scaling(sigmas)
         x_pred = self.model(c_in * x_noisy, sigmas)
+
         x_denoised = c_skip * x_noisy + c_out * x_pred
 
         return x_denoised
@@ -68,13 +68,14 @@ class Denoiser(nn.Module):
         # lambda(sigma)
         return (sigmas ** 2 + self.sigma_data ** 2) / (sigmas * self.sigma_data) ** 2
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, sigma=None) -> Tensor:
         # TODO: seperate calculating loss and forward method
         b, device = x.shape[0], x.device
         sigmas = self.get_noise(num_samples=b, device=device)
         sigmas_padded = rearrange(sigmas, "b -> b 1 1")
         noise = torch.randn_like(x)
         x_noisy = x + sigmas_padded.squeeze(1) * noise
+        sigmas = sigma if exists(sigma) else sigmas
         x_denoised = self.denoise_fn(x_noisy, sigmas=sigmas)
         
         return x_denoised,sigmas
@@ -108,40 +109,48 @@ class KarrasSampler(nn.Module):
 
     @torch.no_grad()
     def denoise(
-        self, x: Tensor, model: Callable, sigma: float, sigma_next: float, gamma: float
+        self, x: Tensor, model: Callable, sigma: Tensor, sigma_next: Tensor, gamma: Tensor
     ) -> Tensor:
-
+        epsilon = (self.s_noise**2) * torch.randn_like(x)
+        sigma_hat = sigma * (gamma + 1)
+        x_hat = x + ((sigma_hat) ** 2 - sigma ** 2)**0.5 * epsilon
         
-        epsilon = (self.s_noise**2) * torch.randn_like(x) # sample e_i ~ N(0,S_noise^2)
-        sigma_hat = sigma * (gamma + 1) # sigma_hat <- sigma_i + gamma*sigma_i
-        x_hat = x + ((sigma_hat) ** 2 - sigma ** 2)**0.5 * epsilon # x_hat <- x + sqrt(sigma_hat^2 - sigma_i^2) * eps
-        d = (x_hat - model(x_hat, sigma=sigma_hat)) / sigma_hat # d = (x_hat - Denoise_func(x_hat, sigma_hat)) / sigma_hat
-        x_next = x_hat + (sigma_next - sigma_hat) * d # update x with estimated noise. d has a denominator of sigma_hat.
-        if sigma_next != 0: # if not final layer, then apply 2nd order correction (revise x_next using sigma_next)
-            model_out_next = model(x_next, sigma=sigma_next) # calculate x_next
-            d_prime = (x_next - model_out_next) / sigma_next # subtract noise
-            x_next = x_hat + (sigma_next - sigma_hat) * 0.5 * (d + d_prime) # 2nd order correction (weight: d = 0.5, d_prime = 0.5)
+        # Create a sigma_hat tensor of the same shape as x
+        sigma_hat_expanded = sigma_hat.expand(x.shape[0], 1)
+        d = (x_hat - model.denoise_fn(x_hat, sigma_hat_expanded.squeeze(-1))) / sigma_hat
+        x_next = x_hat + (sigma_next - sigma_hat.squeeze(-1)) * d
+        
+        if not torch.all(sigma_next == 0):  # Check if any sigma_next is non-zero
+            # Create a sigma_next tensor of the same shape as x
+            sigma_next_expanded = sigma_next.expand(x.shape[0], 1)
+            
+            model_out_next = model.denoise_fn(x_next, sigma_next_expanded.squeeze(-1))
+            d_prime = (x_next - model_out_next) / sigma_next
+            x_next = x_hat + (sigma_next - sigma_hat) * 0.5 * (d + d_prime)
+        
         return x_next
 
-    
     def forward(
         self, noise: Tensor, model: Callable, sigmas: Tensor, num_steps: int
     ) -> Tensor:
-        x = (sigmas[0]**2) * noise # sample x_0 ~ N(0,sigmas[0])
-        gammas = torch.where( # gamma for higher noise level 
-            (self.s_tmin <= sigmas <= self.s_tmax),
-            min(self.s_churn / num_steps, 0.41421356237309504), # 0.4142 ~ sqrt(2) - 1
-            0.0,
+        x = sigmas[0].pow(2) * noise  # Use .pow(2) instead of **2 for better compatibility
+        
+        gammas = torch.where(
+            (self.s_tmin <= sigmas) & (sigmas <= self.s_tmax),
+            torch.tensor(min(self.s_churn / num_steps, 0.41421356237309504)),
+            torch.tensor(0.0)
         )
-
+        
         for i in range(num_steps - 1):
             x = self.denoise(
-                x, model=model, sigma=sigmas[i], sigma_next=sigmas[i + 1], gamma=gammas[i]  # type: ignore # noqa
+                x, 
+                model=model, 
+                sigma=sigmas[i].unsqueeze(0),  # Add batch dimension
+                sigma_next=sigmas[i + 1].unsqueeze(0),  # Add batch dimension
+                gamma=gammas[i].unsqueeze(0)  # Add batch dimension
             )
-
+        
         return x
-
-
 
 
 class KarrasSchedule(nn.Module):

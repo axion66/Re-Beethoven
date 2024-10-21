@@ -39,14 +39,14 @@ class MultiheadFlashDiff(nn.Module):
         x,
     ):  
         b, seq_len, embed_dim = x.size()
-
+    
         q = self.q_proj(x)
         k = self.k_proj(x)
         v = self.v_proj(x)
 
         q = q.view(b, seq_len, 2 * self.num_heads, self.head_dim)
         k = k.view(b, seq_len, 2 * self.num_heads, self.head_dim)
-        v = v.view(b, seq_len, self.num_heads, 2, self.head_dim)
+        v = v.view(b, seq_len, self.num_heads, 2 * self.head_dim)
 
         q = self.rotary.rotate_queries_or_keys(q)
         k = self.rotary.rotate_queries_or_keys(k)
@@ -55,10 +55,9 @@ class MultiheadFlashDiff(nn.Module):
         k = k.reshape(b, seq_len, self.num_heads, 2, self.head_dim)
         q1, q2 = q[:, :, :, 0], q[:, :, :, 1] # same as q[:,:,:,0,:].squeeze(-2). it's correct!
         k1, k2 = k[:, :, :, 0], k[:, :, :, 1]
-        v1, v2 = v[:, :, :, 0], v[:, :, :, 1]
-        attn1 = self.scaled_dot_product_attention(q1,k1,v1)#flash_attn_func(q1, k1, v1, causal=True)
-        attn2 = self.scaled_dot_product_attention(q2, k2, v2)#flash_attn_func(q2, k2, v2, causal=True)
-    
+        attn1 = self.scaled_dot_product_attention(q1,k1,v)#flash_attn_func(q1, k1, v1, causal=True)
+        attn2 = self.scaled_dot_product_attention(q2, k2, v)#flash_attn_func(q2, k2, v2, causal=True)
+
         attn = self.ln(attn1 - self.get_lambda(q) * attn2)
         attn = attn * (1 - self.lambda_init)
         attn = attn.reshape(b, seq_len, self.embed_dim)

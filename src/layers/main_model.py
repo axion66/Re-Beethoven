@@ -6,17 +6,7 @@ from layers.attentionBlock import TransformerBlock
 #from nnAudio.features import MelSpectrogram,STFT,iSTFT# instead, use TorchSTFT class.
 #from nnAudio.Spectrogram import Griffin_Lim
 
-# config
-SR = 8000
-N_FFT = 128
-WIN_LEN = 128
-HOP_LENGTH = 64
-CHUNK_LENGTH = 30
-N_MELS = 64
-MIN=1e-7
-MAX=2e+5
 
-        
 
 
 class ConvBlock(nn.Module):
@@ -48,7 +38,7 @@ class ConvBlock(nn.Module):
         x = self.rms2(x)
         x = x.transpose(-1, -2)
 
-        x = F.avg_pool1d(x, kernel_size=2, stride=2)
+        #x = F.avg_pool1d(x, kernel_size=2, stride=2)
         x = F.dropout(x, p=self.p)
 
         x = x.transpose(-1, -2) 
@@ -73,29 +63,50 @@ class CNNEncoder(nn.Module):
         return x
     
 
+
 class ConvBlockDecoder(nn.Module):
     def __init__(self, in_channels, out_channels, p=0.2):
-        super().__init__()
-        self.layer = nn.Sequential(
-            nn.ConvTranspose1d(in_channels=in_channels,
-                               out_channels=out_channels,
-                               kernel_size=3, stride=2,
-                               padding=1, output_padding=1, bias=False),
-            RMSNorm(out_channels),
-            nn.SiLU(),
-            nn.ConvTranspose1d(in_channels=out_channels,
-                               out_channels=out_channels,
-                               kernel_size=5, stride=1,
-                               padding=2, bias=True),
+        super(ConvBlockDecoder, self).__init__()
+
+        # Define each layer separately
+        self.conv_transpose1 = nn.ConvTranspose1d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=3, stride=1,
+            padding=1, bias=False
         )
-        self.norm = RMSNorm(out_channels, bias=True)
+        self.rms1 = RMSNorm(out_channels)
+        self.activation = nn.SiLU()
+        self.conv_transpose2 = nn.ConvTranspose1d(
+            in_channels=out_channels,
+            out_channels=out_channels,
+            kernel_size=5, stride=1,
+            padding=2, bias=True
+        )
+        self.rms2 = RMSNorm(out_channels, bias=True)
+        
         self.p = p
 
     def forward(self, x):
-        x = x.transpose(-1, -2)
-        x = self.norm(self.layer(x) + x)
+        # Input shape: [batch, length, channels]
+        x = x.transpose(-1, -2)  # Change to [batch, channels, length]
+
+        # Forward pass through each layer
+        x = self.conv_transpose1(x)
+        x = x.transpose(-1,-2)
+        x = self.rms1(x)
+        x = x.transpose(-1,-2)
+        x = self.activation(x)
+        x = self.conv_transpose2(x)
+        x = x.transpose(-1,-2)
+        x = self.rms2(x)
+        x = x.transpose(-1,-2)
+
+        # Apply dropout
         x = F.dropout(x, p=self.p)
-        x = x.transpose(-1, -2)
+
+        # Transpose back to original shape
+        x = x.transpose(-1, -2)  # Change back to [batch, length, channels]
         return x
 
 class CNNDecoder(nn.Module):
@@ -103,8 +114,8 @@ class CNNDecoder(nn.Module):
         super().__init__()
         self.blocks = nn.ModuleList([])
 
-        for i in range(len(channels) - 1, 0, -1):
-            self.blocks.append(ConvBlockDecoder(in_channels=channels[i], out_channels=channels[i - 1], p=0.2))
+        for i in range(len(channels) - 1):
+            self.blocks.append(ConvBlockDecoder(in_channels=channels[i], out_channels=channels[i + 1], p=0.2))
 
     def forward(self, x):
         for block in self.blocks:
@@ -132,6 +143,7 @@ class net(nn.Module):
    
     def __init__(self,config):
         super().__init__()
+        self.config = config
         sequence_length = config['seq_len'] 
         num_blocks = config['num_blocks']
         self.sequence_length = sequence_length  
@@ -163,30 +175,24 @@ class net(nn.Module):
             x: [batch,seq],
             sigmas: [batch]
         '''
-        print(sigmas.shape)
         with torch.no_grad():
             mag,angle = self.stft.transform(x) 
             x = torch.cat((mag,angle),dim=1) 
             x = x.transpose(-1,-2) # batch, frames[t], 2 * freq_bins
-            
-
         x = self.encoder(x)
-        print(self.embed_dim)
         sigmas = self.time_emb(sigmas.unsqueeze(-1))
-        print(sigmas.shape)
-        sigmas = self.time_in_proj(sigmas).unsqueeze(-1)
-        print(f"ff: {x.shape} {sigmas.shape}")
+        sigmas = self.time_in_proj(sigmas).unsqueeze(1)
         x = x + sigmas
         for trans in self.transformer:
             x = trans(x + sigmas)
 
-       
         x = self.decoder(x)
+        x = x[:,:self.seq_len,:]
         x = self.ff(x)
 
-
-        spec = x[:,:,:N_FFT // 2 + 1]
-        phase = x[:, :, N_FFT // 2 + 1:]
+        spec = x[:,:, :self.config['n_fft'] // 2 + 1]
+        phase = x[:,:, self.config['n_fft'] // 2 + 1:]
+        
         return self.stft.inverse(spec,phase) 
     
 
