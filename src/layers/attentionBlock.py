@@ -121,14 +121,19 @@ class TransformerBlock(nn.Module):
         self.ff = PositionwiseFeedForward(dims=embed_dim,)
         self.out = nn.Linear(embed_dim,embed_dim,bias=False)
 
+        self.adaptive_scale = nn.Sequential(PositionwiseFeedForward(dim=embed_dim),nn.SiLU(),nn.Linear(embed_dim,embed_dim*2))
     
-    def forward(self, x):
+    def forward(self, x,sigmas):
         '''
         Get x: [batch,seq,embed_dim]
+        Get sigmas: [batch,embed_dim]
         '''
+        orig = x
+        scale,shift = self.adaptive_scale(sigmas).unsqueeze(-1).chunk(chunks=2,dim=1)
 
-        x = self.ln1(x)
-        x = self.ln2(self.attn(x) + x)
+        
+        x = torch.addcmul(shift,self.ln1(x),scale+1,)
+        x = self.ln2(self.attn(x) + orig)
         x = self.ln3(self.ff(x) + x)
         x = self.out(x)
         return x

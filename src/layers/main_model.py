@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from layers.utils import RMSNorm,PositionwiseFeedForward,TorchSTFT
+from layers.tools.audios import TorchSTFT
+from layers.tools.utils import RMSNorm,PositionwiseFeedForward
 from layers.attentionBlock import TransformerBlock
 #from nnAudio.features import MelSpectrogram,STFT,iSTFT# instead, use TorchSTFT class.
 #from nnAudio.Spectrogram import Griffin_Lim
-
 
 
 
@@ -125,10 +125,14 @@ class CNNDecoder(nn.Module):
 
 
 class FourierFeatures(nn.Module):
+    # from NCSN++.
     def __init__(self, in_features, out_features, std=1.):
         super().__init__()
         assert out_features % 2 == 0
-        self.register_buffer('weight', torch.randn([out_features // 2, in_features]) * std)
+        self.register_buffer('weight', torch.randn([out_features // 2, in_features]) * std) 
+        # Don't understand 1 -> embed where transition is done w/ noise that makes model harder to understand.
+        # the idea of expanding (1,) shape into sin,cos seems too much. even though it has some smoothing effect.
+        #self.proj = nn.Linear(in_features=in_features,out_features=out_features//2,bias=False)
 
     def forward(self, x):
         f = 2 * 3.141592653589793 * x @ self.weight.T
@@ -159,9 +163,17 @@ class net(nn.Module):
         self.ff = PositionwiseFeedForward(dims=self.embed_dim)
 
 
+        #mapping
         self.time_emb = FourierFeatures(1, self.embed_dim)
-        self.time_in_proj = nn.Linear(self.embed_dim, 512, bias=False)
-        
+        self.map_layers = nn.Sequential(
+            nn.Linear(self.embed_dim, 512, bias=False),
+            nn.SiLU(),
+            nn.Linear(512,512),
+            nn.SiLU(),
+            nn.Linear(512,512)
+        )
+
+
     def calculate_spectrogram_shape(self,sequence_length):
         # Calculate the number of frames (time dimension)
         with torch.no_grad():
@@ -175,17 +187,20 @@ class net(nn.Module):
             x: [batch,seq],
             sigmas: [batch]
         '''
+        # mapping
+        sigmas = self.time_emb(sigmas.unsqueeze(-1))
+        sigmas = self.map_layers(sigmas)
+        sigmas = F.silu(sigmas)
+
+
+
         with torch.no_grad():
             mag,angle = self.stft.transform(x) 
             x = torch.cat((mag,angle),dim=1) 
             x = x.transpose(-1,-2) # batch, frames[t], 2 * freq_bins
         x = self.encoder(x)
-        sigmas = self.time_emb(sigmas.unsqueeze(-1))
-        sigmas = self.time_in_proj(sigmas).unsqueeze(1)
-        x = x + sigmas
         for trans in self.transformer:
-            x = trans(x + sigmas)
-
+            x = trans(x,sigmas)
         x = self.decoder(x)
         x = x[:,:self.seq_len,:]
         x = self.ff(x)
