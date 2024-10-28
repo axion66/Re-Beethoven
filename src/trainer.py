@@ -45,9 +45,7 @@ class Trainer:
 
 
         # Initialize sampler and scheduler
-        self.sampler = KarrasSampler()
-        self.scheduler = KarrasSchedule()
-
+    
     def get_config(self, cfg_path):
         with open(cfg_path) as stream:
             try:
@@ -129,7 +127,7 @@ class Trainer:
         if self.eval_losses:  # Check if there are any eval losses
             eval_x = range(0, len(self.eval_losses) * 20, 20)
             plt.plot(eval_x, self.eval_losses, label='Eval Loss', color='orange', marker='o')
-
+    
         plt.xlabel('Epochs')
         plt.ylabel('Loss')
         plt.title('Training and Evaluation Losses')
@@ -159,15 +157,17 @@ class Trainer:
         return dLoader, dLoader_test
 
 
-    def generate_samples(self, num_samples: int, num_steps: int, output_dir: str) -> None:
+    def generate_samples(
+            self,
+            num_samples: int,
+            num_steps: int,
+            output_dir: str
+        ) -> None:
         audio_path = output_dir
         os.makedirs(audio_path, exist_ok=True)
 
-        noise = torch.randn(num_samples, self.fft_setup['seq_len']).to(self.model_param['device']) 
-        sigmas = self.scheduler(num_steps=num_steps, device=self.model_param['device'])
-   
         with torch.no_grad():
-            generated_samples = self.sampler(noise, model=self.model, sigmas=sigmas, num_steps=num_steps)
+            generated_samples = self.model.sample(num_samples,num_steps)
 
         for i in range(num_samples):
             sample = generated_samples[i].cpu().numpy().flatten()

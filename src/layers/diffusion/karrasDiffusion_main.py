@@ -89,7 +89,7 @@ class Denoiser(nn.Module):
     ) -> Tensor:
         
 
-        sigmas = self._schudule_sigmas(num_steps,device=self.devic).unsqueeze(-1) # t = {batch,1}
+        sigmas = self._schudule_sigmas(num_steps,device=self.device).unsqueeze(-1) # t = {batch,1}
 
         x = torch.normal(0,sigmas[0] ** 2,size=(num_samples,self.model.sequence_length),device=self.device)  # start x
         gammas = torch.where(
