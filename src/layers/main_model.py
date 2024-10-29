@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from layers.tools.audios import TorchSTFT
+from layers.tools.audios import RevSTFT
 from layers.tools.utils import RMSNorm,PositionwiseFeedForward
 from layers.attentionBlock import TransformerBlock
 #from nnAudio.features import MelSpectrogram,STFT,iSTFT# instead, use TorchSTFT class.
@@ -151,7 +151,7 @@ class net(nn.Module):
         sequence_length = config['seq_len'] 
         num_blocks = config['num_blocks']
         self.sequence_length = sequence_length  
-        self.stft = TorchSTFT(config)
+        self.stft = RevSTFT(config)
         self.seq_len,self.embed_dim = self.calculate_spectrogram_shape(sequence_length)
 
         self.encoder = CNNEncoder(channels=[self.embed_dim,512,512])

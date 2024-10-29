@@ -3,7 +3,7 @@ import yaml
 import torch
 import torch.nn as nn
 from layers.main_model import net
-from layers.diffusion.karrasDiffusion_main import Denoiser,KarrasSampler,KarrasSchedule
+from layers.diffusion.karrasDiffusion_main import Denoiser
 from torch.optim import Adam
 from layers.preprocess import load_mp3_files, create_overlapping_chunks_tensor
 from torch.utils.data import TensorDataset, DataLoader
@@ -24,7 +24,7 @@ class Trainer:
         self.file_path = self.cfg['file_path']
 
         self.net = net(self.fft_setup)
-        self.model = Denoiser(model=self.net, sigma_data=0.5).to(self.model_param['device'])
+        self.model = Denoiser(model=self.net, sigma_data=0.5,device=torch.device(self.model_param['device'])).to(self.model_param['device'])
         self.model_optimizer = Adam(self.model.parameters(), lr=self.model_param['lr'], betas=(0.9, 0.95), weight_decay=0.1)
 
         self.train_losses = []
@@ -67,8 +67,8 @@ class Trainer:
             for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{EPOCH}")):
                 self.model_optimizer.zero_grad()
                 x = x[0].to(self.model_param['device'])
-                x_denoised, sigmas = self.model(x)
-                loss = self.model.calculate_loss(x, x_denoised, sigmas)
+                x_denoised, sigmas = self.model(x,)
+                loss = self.model.loss_fn(x, x_denoised, sigmas)
                 loss.backward()
 
                 self.model_optimizer.step()
@@ -127,7 +127,7 @@ class Trainer:
         if self.eval_losses:  # Check if there are any eval losses
             eval_x = range(0, len(self.eval_losses) * 20, 20)
             plt.plot(eval_x, self.eval_losses, label='Eval Loss', color='orange', marker='o')
-    
+
         plt.xlabel('Epochs')
         plt.ylabel('Loss')
         plt.title('Training and Evaluation Losses')

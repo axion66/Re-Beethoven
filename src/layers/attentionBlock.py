@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 #from flash_attn import flash_attn_func #pip install flash-attn --no-build-isolation
 from rotary_embedding_torch import RotaryEmbedding
-from layers.utils import RMSNorm,PositionwiseFeedForward
+from layers.tools.utils import RMSNorm,PositionwiseFeedForward
 
 class MultiheadFlashDiff(nn.Module):
     # https://github.com/microsoft/unilm/blob/master/Diff-Transformer/multihead_flashdiff_1.py
@@ -121,7 +121,7 @@ class TransformerBlock(nn.Module):
         self.ff = PositionwiseFeedForward(dims=embed_dim,)
         self.out = nn.Linear(embed_dim,embed_dim,bias=False)
 
-        self.adaptive_scale = nn.Sequential(PositionwiseFeedForward(dim=embed_dim),nn.SiLU(),nn.Linear(embed_dim,embed_dim*2))
+        self.adaptive_scale = nn.Sequential(PositionwiseFeedForward(dims=embed_dim),nn.SiLU(),nn.Linear(embed_dim,embed_dim*2))
     
     def forward(self, x,sigmas):
         '''
@@ -129,7 +129,7 @@ class TransformerBlock(nn.Module):
         Get sigmas: [batch,embed_dim]
         '''
         orig = x
-        scale,shift = self.adaptive_scale(sigmas).unsqueeze(-1).chunk(chunks=2,dim=1)
+        scale,shift = self.adaptive_scale(sigmas).chunk(chunks=2,dim=-1)
 
         
         x = torch.addcmul(shift,self.ln1(x),scale+1,)

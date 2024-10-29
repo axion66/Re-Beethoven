@@ -15,7 +15,7 @@ class Denoiser(nn.Module):
         model: nn.Module,
         sigma_data: float=0.5,  # data distribution standard deviation
         sigma_min=0.002,
-        sigma_max=3, # paper suggests 80, but I will go with 3
+        sigma_max=5, # paper suggests 80, but I will go with 3
         rho: float = 3.0, # for image, set it 7
         s_churn: float = 40.0, # controls stochasticity(SDE)  0 for deterministic(ODE)
         s_tmin: float = 0.05, # I need to find with grid search, but who wants to do that..
@@ -57,19 +57,19 @@ class Denoiser(nn.Module):
  
 
     def forward(self, x: Tensor) -> Tensor:
-        # std transformation
+        # std transformation & RevIN
         x_std = torch.clamp(x.std(dim=-1,keepdim=True),min=1e-9)
-        x = x * self.sigma_data / x_std
-
+        x_mean = x.mean(dim=-1,keepdim=True)
+        x = (x - x_mean) * self.sigma_data / x_std
 
         b, device = x.shape[0], x.device
-        sigmas = self.sigma_noise(num_samples=b).reshape(-1,1,1) # sigmas = normal(-1.2,1.2).exp()
-        noise = torch.randn_like(x) * sigmas
+        sigmas = self.sigma_noise(num_samples=b).reshape(-1,1) # sigmas = normal(-1.2,1.2).exp()
+        noise = torch.randn_like(x) * sigmas # add noise at audio level, as stft-version will be just sum of frequencies with  discrete bins.
         x_noised = x + noise
         x_denoised = self.denoise_fn(x_noised, sigmas=sigmas)
-        
+
         # std transformation
-        x_denoised = x_denoised * x_std / self.sigma_data
+        x_denoised = (x_denoised * x_std / self.sigma_data) + x_mean
 
         return x_denoised,sigmas
 

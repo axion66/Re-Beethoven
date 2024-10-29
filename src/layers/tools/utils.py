@@ -52,6 +52,7 @@ class RMSNorm(nn.Module):
 
 class Linear(nn.Module): # x * adaLN(x)
     def __init__(self, in_chn,out_chn,bias=True):
+        super().__init__()
         self.linear = nn.Linear(in_chn,out_chn*3,bias=False)
         self.bias = nn.Parameter(torch.ones(1))
     def forward(self,x):
@@ -61,7 +62,7 @@ class Linear(nn.Module): # x * adaLN(x)
 
 class PositionwiseFeedForward(nn.Sequential):
 
-    def __init__(self, dims: int,activation=nn.SiLU(),rate: int = 4, dropout: float = 0.2):
+    def __init__(self, dims: int, activation=nn.SiLU(),rate: int = 4, dropout: float = 0.2):
         super().__init__(
             Linear(dims,dims * rate),
             activation,

@@ -1,18 +1,18 @@
 fft_setup:
-  n_fft: 1024
-  win_len: 1024
-  hop_length: 512
+  n_fft: 2048
+  win_len: 2048
+  hop_length: 1024
   seq_len: 163840
   overlap_ratio: 128
   cut_first: 10240
   sr: 10240
-  num_test_samples: 64
-  num_blocks: 12
+  num_test_samples: 16
+  num_blocks: 4
 
 model_param:
-  epoch: 300
-  device: "cuda:0"
-  batch_size: 16
+  epoch: 1
+  device: "cpu"
+  batch_size: 1
   lr: 0.001
 
 file_path:
