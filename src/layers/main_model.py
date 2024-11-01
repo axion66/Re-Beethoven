@@ -142,7 +142,6 @@ class FourierFeatures(nn.Module):
 
 
 
-
 class net(nn.Module):
    
     def __init__(self,config):

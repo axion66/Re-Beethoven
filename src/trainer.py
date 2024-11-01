@@ -62,6 +62,8 @@ class Trainer:
 
         for epoch in range(self.model_param['epoch']):
             self.model.train()
+            
+            
             epoch_losses = []
 
             for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{EPOCH}")):
@@ -82,9 +84,8 @@ class Trainer:
             wandb.log({"train_loss": avg_train_loss})
 
             print(f"Epoch {epoch+1}/{EPOCH}, Average Train Loss: {avg_train_loss:.4f}")
-
-            # Evaluate the model and generate samples every 20 epochs
-            if (epoch + 1) % 20 == 0:
+            
+            if (epoch + 1) % 10 == 0:
                 eval_loss = self.evaluate(self.test_loader)
                 self.eval_losses.append(eval_loss)
                 wandb.log({"eval_loss": eval_loss})
@@ -95,8 +96,8 @@ class Trainer:
                     torch.save(self.model.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
 
                 # Generate samples
-                num_samples = 5  # You can adjust this number
-                num_steps = 1000  # You can adjust this number
+                num_samples = 4  # You can adjust this number
+                num_steps = 100  # You can adjust this number
                 samples_dir = os.path.join(LOG_DIR, f"samples_epoch_{epoch+1}")
                 self.generate_samples(num_samples, num_steps, samples_dir)
 
@@ -116,7 +117,7 @@ class Trainer:
             for x in test_loader:
                 x = x[0].to(self.model_param['device']) # list to TEnsor
                 x_denoised, sigmas = self.model(x)
-                loss = self.model.calculate_loss(x, x_denoised, sigmas)
+                loss = self.model.loss_fn(x, x_denoised, sigmas)
                 total_loss += loss.item()
         return total_loss / len(test_loader)
 

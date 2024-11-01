@@ -14,8 +14,8 @@ class Denoiser(nn.Module):
         self,
         model: nn.Module,
         sigma_data: float=0.5,  # data distribution standard deviation
-        sigma_min=0.002,
-        sigma_max=5, # paper suggests 80, but I will go with 3
+        sigma_min=0.0015,
+        sigma_max=1, # paper suggests 80, but I will go with 3
         rho: float = 3.0, # for image, set it 7
         s_churn: float = 40.0, # controls stochasticity(SDE)  0 for deterministic(ODE)
         s_tmin: float = 0.05, # I need to find with grid search, but who wants to do that..
@@ -38,6 +38,7 @@ class Denoiser(nn.Module):
         self.s_churn = s_churn
         self.s_noise = s_noise
 
+    
     def denoise_fn(
         self,
         x_noised: Tensor,
@@ -48,6 +49,7 @@ class Denoiser(nn.Module):
         c_out = sigmas * self.sigma_data / ((sigmas**2 + self.sigma_data**2) ** 0.5) 
         c_in = 1 / ((sigmas**2 + self.sigma_data**2) ** 0.5) 
         c_noise = sigmas.log() / 4 
+
 
         new_x = self.model(c_in * x_noised, c_noise)
         x_denoised = c_skip * x_noised + c_out * new_x
@@ -63,7 +65,7 @@ class Denoiser(nn.Module):
         x = (x - x_mean) * self.sigma_data / x_std
 
         b, device = x.shape[0], x.device
-        sigmas = self.sigma_noise(num_samples=b).reshape(-1,1) # sigmas = normal(-1.2,1.2).exp()
+        sigmas = self.sigma_noise(num_samples=b).unsqueeze(-1) # sigmas = normal(-1.2,1.2).exp()
         noise = torch.randn_like(x) * sigmas # add noise at audio level, as stft-version will be just sum of frequencies with  discrete bins.
         x_noised = x + noise
         x_denoised = self.denoise_fn(x_noised, sigmas=sigmas)
@@ -89,9 +91,9 @@ class Denoiser(nn.Module):
     ) -> Tensor:
         
 
-        sigmas = self._schudule_sigmas(num_steps,device=self.device).unsqueeze(-1) # t = {batch,1}
+        sigmas = self._schudule_sigmas(num_steps).unsqueeze(-1) # t = {batch,1}
 
-        x = torch.normal(0,sigmas[0] ** 2,size=(num_samples,self.model.sequence_length),device=self.device)  # start x
+        x = sigmas[0] ** 2 * torch.randn((num_samples,self.model.sequence_length),device=self.device) 
         gammas = torch.where(
             (self.s_tmin <= sigmas) & (sigmas <= self.s_tmax),
             torch.tensor(min(self.s_churn/num_steps, 0.41421356237309504)), # 0.4142 ~ sqrt(2) - 1
@@ -131,15 +133,12 @@ class Denoiser(nn.Module):
         epsilon = (self.s_noise**2) * torch.randn_like(x)
         sigma_hat = sigma * (1 + gamma)
         x_hat = x + (sigma_hat ** 2 - sigma ** 2)**0.5 * epsilon
-        
         d = (x_hat - self.denoise_fn(x_hat, sigma_hat)) / sigma_hat
         x_next = x_hat + (sigma_next - sigma_hat) * d
-        
         if sigma_next.values != 0:
             # Create a sigma_next tensor of the same shape as x
-            sigma_next_expanded = sigma_next.expand(x.shape[0], 1)
-            
-            model_out_next = self.denoise_fn(x_next, sigma_next_expanded.squeeze(-1))
+
+            model_out_next = self.denoise_fn(x_next, sigma_next)
             d_prime = (x_next - model_out_next) / sigma_next
             x_next = x_hat + (sigma_next - sigma_hat) * 0.5 * (d + d_prime)
         
