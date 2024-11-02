@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from layers.tools.audios import RevSTFT
-from layers.tools.utils import RMSNorm,PositionwiseFeedForward
+from layers.tools.utils import RMSNorm,PositionwiseFeedForward,Linear
 from layers.attentionBlock import TransformerBlock
 #from nnAudio.features import MelSpectrogram,STFT,iSTFT# instead, use TorchSTFT class.
 #from nnAudio.Spectrogram import Griffin_Lim
@@ -165,11 +165,11 @@ class net(nn.Module):
         #mapping
         self.time_emb = FourierFeatures(1, self.embed_dim)
         self.map_layers = nn.Sequential(
-            nn.Linear(self.embed_dim, 512, bias=False),
+            Linear(self.embed_dim, 512, bias=False),
             nn.SiLU(),
-            nn.Linear(512,512),
+            Linear(512,512),
             nn.SiLU(),
-            nn.Linear(512,512)
+            Linear(512,512)
         )
 
 
@@ -189,7 +189,6 @@ class net(nn.Module):
         # mapping
         sigmas = self.time_emb(sigmas.unsqueeze(-1))
         sigmas = self.map_layers(sigmas)
-        sigmas = F.silu(sigmas)
 
 
 

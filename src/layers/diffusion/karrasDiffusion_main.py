@@ -60,7 +60,7 @@ class Denoiser(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         # std transformation & RevIN
-        x_std = torch.clamp(x.std(dim=-1,keepdim=True),min=1e-9)
+        x_std = x.std(dim=-1,keepdim=True)
         x_mean = x.mean(dim=-1,keepdim=True)
         x = (x - x_mean) * self.sigma_data / x_std
 
@@ -144,27 +144,3 @@ class Denoiser(nn.Module):
         
         return x_next
     
-
-class KarrasNoiseAdder(nn.Module):
-    def __init__(self, sigma_data: float = 0.5):
-        super().__init__()
-        self.sigma_data = sigma_data
-
-        self.noisy_x_list = []
-    def forward(self, x: Tensor, sigmas: Tensor) -> Tensor:
-        """Adds noise to x at each sigma step."""
-        b, device = x.shape[0], x.device
-        noisy_x = x.clone()  # Start with the original input
-        self.noisy_x_list.append(noisy_x)
-        # Iterate through each sigma and add noise
-        for sigma in sigmas:
-            noise = torch.randn_like(x) * sigma
-            x_noised = x + noise
-            c_in = 1 / ((sigma**2 + 0.5**2) ** 0.5) 
-            self.noisy_x_list.append(x_noised * c_in)
-        return x
-
-    @property
-    def noised_x(self):
-        return self.noisy_x_list
-

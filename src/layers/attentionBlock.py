@@ -105,7 +105,7 @@ class MultiheadFlashDiff(nn.Module):
 
 class TransformerBlock(nn.Module):
 
-    def __init__(self, embed_dim, depth,num_heads):
+    def __init__(self, embed_dim, depth,num_heads,p=0.1):
         super().__init__()
         
         assert embed_dim % num_heads == 0
@@ -122,7 +122,7 @@ class TransformerBlock(nn.Module):
         self.out = nn.Linear(embed_dim,embed_dim,bias=False)
 
         self.adaptive_scale = nn.Sequential(PositionwiseFeedForward(dims=embed_dim),nn.SiLU(),nn.Linear(embed_dim,embed_dim*2))
-    
+        self.dropout = nn.Dropout(p=p)
     def forward(self, x,sigmas):
         '''
         Get x: [batch,seq,embed_dim]
@@ -130,10 +130,12 @@ class TransformerBlock(nn.Module):
         '''
         orig = x
         scale,shift = self.adaptive_scale(sigmas).chunk(chunks=2,dim=-1)
+        scale = scale.unsqueeze(1) # b,1,seq
+        shift = shift.unsqueeze(1) # b,1,seq
+        x = torch.addcmul(shift, self.ln1(x), scale+1)
 
-        
-        x = torch.addcmul(shift,self.ln1(x),scale+1,)
-        x = self.ln2(self.attn(x) + orig)
-        x = self.ln3(self.ff(x) + x)
+
+        x = self.dropout(self.ln2(self.attn(x) + orig))
+        x = self.dropout(self.ln3(self.ff(x) + x))
         x = self.out(x)
         return x
