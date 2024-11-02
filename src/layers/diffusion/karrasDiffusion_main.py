@@ -27,7 +27,8 @@ class Denoiser(nn.Module):
         self.device = device
         self.model = model
         self.sigma_data = sigma_data
-        self.sigma_noise = lambda num_samples: torch.normal(-1.2,1.2,size=(num_samples,),device=device).exp()
+        self.sigma_noise = lambda num_samples: (torch.randn((num_samples,1),device=device) * 1.2 - 1.2).exp()
+        #torch.normal(-1.2,1.2,size=(num_samples,),device=device).exp()
         self.sigma_data = sigma_data
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max # Too high.
@@ -60,14 +61,33 @@ class Denoiser(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         # std transformation & RevIN
+        # x: batch, audio_length
         x_std = x.std(dim=-1,keepdim=True)
         x_mean = x.mean(dim=-1,keepdim=True)
         x = (x - x_mean) * self.sigma_data / x_std
 
         b, device = x.shape[0], x.device
-        sigmas = self.sigma_noise(num_samples=b).unsqueeze(-1) # sigmas = normal(-1.2,1.2).exp()
-        noise = torch.randn_like(x) * sigmas # add noise at audio level, as stft-version will be just sum of frequencies with  discrete bins.
+        sigmas = self.sigma_noise(num_samples=b)
+        noise = torch.randn_like(x) * sigmas 
         x_noised = x + noise
+        import torchaudio
+        import os
+        
+        save_dir = "noised_samples"
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # Denormalize noised audio for saving
+        x_noised_denorm = (x_noised * x_std / self.sigma_data) + x_mean
+        
+        # Save first few samples from batch
+        for i in range(b):  # Save up to 5 samples
+            sample_path = os.path.join(save_dir, f"noised_sample_{i}_sigma_{sigmas[i].item():.3f}.wav")
+            torchaudio.save(
+                sample_path,
+                x_noised_denorm[i].cpu().unsqueeze(0),  # Add channel dimension
+                sample_rate=10240  # Adjust sample rate as needed
+            )
+        print("saved audios")
         x_denoised = self.denoise_fn(x_noised, sigmas=sigmas)
 
         # std transformation
@@ -76,11 +96,11 @@ class Denoiser(nn.Module):
         return x_denoised,sigmas
 
     def loss_fn(self,x:Tensor,x_denoised:Tensor,sigmas:Tensor):
+        assert x.shape == x_denoised.shape
         weight = (sigmas ** 2 + self.sigma_data ** 2) / (sigmas * self.sigma_data) ** 2
-        losses = weight * ((x_denoised - x)**2)
-        losses = reduce(losses, "b ... -> b", "mean") # sum for official documentation.
-        loss = losses.mean() # into 1 number
-        return loss
+        loss = weight * ((x_denoised - x)**2)
+
+        return loss.sum()
 
     # sampling part
     @torch.no_grad()

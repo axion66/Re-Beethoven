@@ -192,10 +192,10 @@ class net(nn.Module):
 
 
 
-        with torch.no_grad():
-            mag,angle = self.stft.transform(x) 
-            x = torch.cat((mag,angle),dim=1) 
-            x = x.transpose(-1,-2) # batch, frames[t], 2 * freq_bins
+        #with torch.no_grad():
+        mag,angle = self.stft.transform(x) 
+        x = torch.cat((mag,angle),dim=1) 
+        x = x.transpose(-1,-2) # batch, frames[t], 2 * freq_bins
         x = self.encoder(x)
         for trans in self.transformer:
             x = trans(x,sigmas)
