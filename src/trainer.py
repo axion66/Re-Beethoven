@@ -96,8 +96,8 @@ class Trainer:
                     torch.save(self.model.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
 
                 # Generate samples
-                num_samples = 4  # You can adjust this number
-                num_steps = 100  # You can adjust this number
+                num_samples = 4  
+                num_steps = 100  
                 samples_dir = os.path.join(LOG_DIR, f"samples_epoch_{epoch+1}")
                 self.generate_samples(num_samples, num_steps, samples_dir)
 

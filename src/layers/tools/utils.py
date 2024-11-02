@@ -54,9 +54,10 @@ class Linear(nn.Module): # x * adaLN(x)
     def __init__(self, in_chn,out_chn,bias=True):
         super().__init__()
         self.linear = nn.Linear(in_chn,out_chn*3,bias=False)
-        self.bias = nn.Parameter(torch.ones(1))
-        if (not bias):
-            self.register_buffer('bias',self.bias)
+        if bias:
+            self.bias = nn.Parameter(torch.ones(1))
+        else:
+            self.register_buffer('bias',torch.ones(1))
     def forward(self,x):
         x,scale,shift = self.linear(x).chunk(chunks=3,dim=-1)
 

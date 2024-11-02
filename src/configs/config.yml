@@ -2,18 +2,18 @@ fft_setup:
   n_fft: 2048
   win_len: 2048
   hop_length: 1024
-  seq_len: 163840
-  overlap_ratio: 128
+  seq_len: 327680
+  overlap_ratio: 256
   cut_first: 10240
   sr: 10240
-  num_test_samples: 16
-  num_blocks: 4
+  num_test_samples: 4
+  num_blocks: 12
 
 model_param:
-  epoch: 1
-  device: "cpu"
-  batch_size: 1
-  lr: 0.001
+  epoch: 10000
+  device: "cuda:0"
+  batch_size: 16
+  lr: 0.0003
 
 file_path:
   audio_folder: "../dataset"

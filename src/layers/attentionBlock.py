@@ -131,8 +131,7 @@ class TransformerBlock(nn.Module):
         '''
         orig = x
         scale,shift = self.adaptive_scale(sigmas).chunk(chunks=2,dim=-1)
-        scale = scale.unsqueeze(1) # b,1,seq
-        shift = shift.unsqueeze(1) # b,1,seq
+
         x = torch.addcmul(shift, self.ln1(x), scale+1)
 
 

@@ -198,7 +198,6 @@ class net(nn.Module):
             x = x.transpose(-1,-2) # batch, frames[t], 2 * freq_bins
         x = self.encoder(x)
         for trans in self.transformer:
-            print(f"x.shape: {x.shape}, sigmas.shape: {sigmas.shape}")
             x = trans(x,sigmas)
         x = self.decoder(x)
         x = x[:,:self.seq_len,:]
