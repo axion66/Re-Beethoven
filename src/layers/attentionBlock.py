@@ -4,7 +4,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 #from flash_attn import flash_attn_func #pip install flash-attn --no-build-isolation
 from rotary_embedding_torch import RotaryEmbedding
-from layers.tools.utils import RMSNorm,PositionwiseFeedForward
+from layers.tools.utils import RMSNorm,PositionwiseFeedForward,Linear
+
 
 class MultiheadFlashDiff(nn.Module):
     # https://github.com/microsoft/unilm/blob/master/Diff-Transformer/multihead_flashdiff_1.py
@@ -19,10 +20,10 @@ class MultiheadFlashDiff(nn.Module):
         self.num_heads = num_heads 
         self.head_dim = embed_dim // num_heads // 2
         
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False)
-        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False)
-        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False)
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False)
+        self.q_proj = Linear(embed_dim, embed_dim, bias=False)
+        self.k_proj = Linear(embed_dim, embed_dim, bias=False)
+        self.v_proj = Linear(embed_dim, embed_dim, bias=False)
+        self.out_proj = Linear(embed_dim, embed_dim, bias=False)
 
         self.lambda_init = 0.8 - 0.6 * math.exp(-0.3 * depth)
         self.lambda_q1 = nn.Parameter(torch.zeros(self.head_dim, dtype=torch.float32).normal_(mean=0,std=0.1))
