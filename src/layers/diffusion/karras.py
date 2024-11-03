@@ -14,8 +14,8 @@ class Denoiser(nn.Module):
         self,
         model: nn.Module,
         sigma_data: float=0.5,  # data distribution standard deviation
-        sigma_min=0.0015,
-        sigma_max=1, # paper suggests 80, but I will go with 3
+        sigma_min=0.005,
+        sigma_max=2, # paper suggests 80, but I will go with 3
         rho: float = 3.0, # for image, set it 7
         s_churn: float = 40.0, # controls stochasticity(SDE)  0 for deterministic(ODE)
         s_tmin: float = 0.05, # I need to find with grid search, but who wants to do that..
@@ -70,27 +70,7 @@ class Denoiser(nn.Module):
         sigmas = self.sigma_noise(num_samples=b)
         noise = torch.randn_like(x) * sigmas 
         x_noised = x + noise
-        import torchaudio
-        import os
-        
-        save_dir = "noised_samples"
-        os.makedirs(save_dir, exist_ok=True)
-        
-        # Denormalize noised audio for saving
-        x_noised_denorm = (x_noised * x_std / self.sigma_data) + x_mean
-        
-        # Save first few samples from batch
-        for i in range(b):  # Save up to 5 samples
-            sample_path = os.path.join(save_dir, f"noised_sample_{i}_sigma_{sigmas[i].item():.3f}.wav")
-            torchaudio.save(
-                sample_path,
-                x_noised_denorm[i].cpu().unsqueeze(0),  # Add channel dimension
-                sample_rate=10240  # Adjust sample rate as needed
-            )
-        print("saved audios")
         x_denoised = self.denoise_fn(x_noised, sigmas=sigmas)
-
-        # std transformation
         x_denoised = (x_denoised * x_std / self.sigma_data) + x_mean
 
         return x_denoised,sigmas

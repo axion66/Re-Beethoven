@@ -33,7 +33,7 @@ class RevSTFT(nn.Module):
         # mag & phase. phase is being used but maybe tough for the model to learn, but essential for high quality.
 
     def inverse(self, magnitude, phase):
-
+        
         magnitude = magnitude.transpose(-1,-2)
         phase = phase.transpose(-1,-2)
         inverse_transform = torch.istft(

@@ -2,8 +2,8 @@ import os
 import yaml
 import torch
 import torch.nn as nn
-from layers.main_model import net
-from layers.diffusion.karrasDiffusion_main import Denoiser
+from layers.core import net
+from layers.diffusion.karras import Denoiser
 from torch.optim import Adam
 from layers.preprocess import load_mp3_files, create_overlapping_chunks_tensor
 from torch.utils.data import TensorDataset, DataLoader
@@ -25,7 +25,7 @@ class Trainer:
 
         self.net = net(self.fft_setup)
         self.model = Denoiser(model=self.net, sigma_data=0.5,device=torch.device(self.model_param['device'])).to(self.model_param['device'])
-        self.model_optimizer = Adam(self.model.parameters(), lr=self.model_param['lr'], betas=(0.9, 0.95), weight_decay=0.1)
+        self.model_optimizer = Adam(self.net.parameters(), lr=self.model_param['lr'], betas=(0.9, 0.95), weight_decay=0.1)
 
         self.train_losses = []
         self.eval_losses = []
@@ -62,8 +62,6 @@ class Trainer:
 
         for epoch in range(self.model_param['epoch']):
             self.model.train()
-            
-            
             epoch_losses = []
 
             for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{EPOCH}")):
@@ -72,7 +70,6 @@ class Trainer:
                 x_denoised, sigmas = self.model(x,)
                 loss = self.model.loss_fn(x, x_denoised, sigmas)
                 loss.backward()
-
                 self.model_optimizer.step()
 
                 epoch_losses.append(loss.item())

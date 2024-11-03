@@ -8,10 +8,11 @@ fft_setup:
   sr: 10240
   num_test_samples: 4
   num_blocks: 12
-
+  activation_fn: "xATLU"
+  norm_fn: "LayerNorm"
 model_param:
   epoch: 10000
-  device: "cuda:0"
+  device: "cpu"
   batch_size: 16
   lr: 0.0003
 
