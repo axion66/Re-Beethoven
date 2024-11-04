@@ -117,7 +117,7 @@ class DiffMHAFlash(nn.Module):
         q,k,v = torch.chunk(self.qkv(x),dim=-1,chunks=3)
         q = q.view(b, seq_len, 2 * self.num_heads, self.head_dim)   # batch, seq_len, 2 * n, h
         k = k.view(b, seq_len, 2 * self.num_heads, self.head_dim)   # batch, seq_len, 2 * n, h
-        v = v.view(b, seq_len, self.num_heads, 2 * self.head_dim)   # batch, seq_len, n,  2 * h
+        v = v.view(b, seq_len, self.num_heads, 2, self.head_dim)   # batch, seq_len, n,  2 * h
         
         # Apply RoPE            - (Think This's best option for positional embedding)
         q = self.rotary.rotate_queries_or_keys(q)
@@ -128,13 +128,43 @@ class DiffMHAFlash(nn.Module):
         k = k.reshape(b, seq_len, self.num_heads, 2, self.head_dim)
         q1, q2 = q[:, :, :, 0], q[:, :, :, 1] 
         k1, k2 = k[:, :, :, 0], k[:, :, :, 1]
+        v1, v2 = v[:, :, :, 0], v[:, :, :, 1]
         sigmas = sigmas.unsqueeze(1)   # batch,1,1,head_dim
-
+        q2 =  q2 + sigmas #somehow in-place not wokring as I used torch.view (on top)
+        k2 =  k2 + sigmas
+        v2 =  v2 + sigmas
         # Differential Attention
-        attn1 = flash_attn_func(q1, k1, v, casual=True) if FLASH_ON else self.qkv_attn(q1,k1,v)
-        attn2 = flash_attn_func(self.ln_qkv2(q2 + sigmas), self.ln_qkv2(k2 + sigmas), v, casual=True) if FLASH_ON else self.qkv_attn(self.ln_qkv2(q2 + sigmas), self.ln_qkv2(k2 + sigmas), v)
+        if FLASH_ON:
+            # Convert inputs to float16
+            q1_fp16 = q1.to(dtype=torch.float16)
+            k1_fp16 = k1.to(dtype=torch.float16)
+            v1_fp16 = v1.to(dtype=torch.float16)
+            v2_fp16 = v2.to(dtype=torch.float16)
+            
+            q2_fp16 = q2.to(dtype=torch.float16)
+            k2_fp16 = k2.to(dtype=torch.float16)
+            
+            # First attention pair
+            attn11 = flash_attn_func(q1_fp16, k1_fp16, v1_fp16, causal=True).to(dtype=torch.float32)
+            attn12 = flash_attn_func(q1_fp16, k1_fp16, v2_fp16, causal=True).to(dtype=torch.float32)
+            attn1 = torch.cat([attn11, attn12], dim=-1)
+            
+            # Second attention pair
+            attn21 = flash_attn_func(q2_fp16, k2_fp16, v1_fp16, causal=True).to(dtype=torch.float32)
+            attn22 = flash_attn_func(q2_fp16, k2_fp16, v2_fp16, causal=True).to(dtype=torch.float32)
+            attn2 = torch.cat([attn21, attn22], dim=-1)
+        else:
+            # Use regular qkv attention
+            attn11 = self.qkv_attn(q1, k1, v1)
+            attn12 = self.qkv_attn(q1, k1, v2)
+            attn1 = torch.cat([attn11, attn12], dim=-1)
+            
+            attn21 = self.qkv_attn(q2, k2, v1)
+            attn22 = self.qkv_attn(q2, k2, v2)
+            attn2 = torch.cat([attn21, attn22], dim=-1)
         
         attn = self.ln(attn1 - self.lmd(q) * attn2) * (1 - self.lambda_init)
+
 
         # Reshape and Linear projection
         attn = attn.reshape(b, seq_len, self.embed_dim)

@@ -6,7 +6,7 @@ import torchaudio
 from layers.tools.audios import RevSTFT
 from layers.tools.utils import *
 from layers.attn import TransformerBlock
-from layers.cnn import Encoder,Decoder
+from layers.cnn import Encoder,Decoder,ResBlock
 from layers.tools.activations import get_activation_fn
 from layers.tools.norms import get_norm_fn
 #from nnAudio.features import STFT,iSTFT
@@ -64,7 +64,7 @@ class net(nn.Module):
         super().__init__()
         self.config = config
         self.sequence_length = config['seq_len']                                                # Raw sequence length
-        self.seq_len,self.embed_dim = 1000,240 # for 240,000 length(10sec) audio
+        self.seq_len,self.embed_dim = 1000,480 # for 240,000 length(10sec) audio
         self.num_blocks = config['num_blocks']                                                  # Number of Transformer blocks
         activation_fn = get_activation_fn(config['activation_fn'],in_chn=self.embed_dim)
         norm_fn = get_norm_fn(config['norm_fn'])
@@ -81,18 +81,17 @@ class net(nn.Module):
             Linear(512//8//2,512//8//2)
         )
 
-        self.encoder = Encoder(channels=[self.embed_dim,256,256,512,512],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
-        self.decoder = Decoder(channels=[512,512,256,256,self.embed_dim],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
+        self.encoder = Encoder(channels=[self.embed_dim,512,512],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
+        self.decoder = Decoder(channels=[512,512,self.embed_dim],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
         self.transformer = nn.ModuleList(
             [TransformerBlock(embed_dim=512, depth=i + 1, num_heads=8,activation_fn=activation_fn,norm_fn=norm_fn) for i in range(self.num_blocks)]
         )
-        self.act = activation_fn
-        self.out = PositionwiseFeedForward(dims=self.embed_dim,activation=activation_fn,dropout=p)
-
-
-
-
-
+    
+        self.last = ResBlock(channels=self.embed_dim,
+                              kernel=3,
+                              activation_fn=activation_fn,
+                              norm_fn=norm_fn,
+                              dropout=p)
     def forward(self,x,sigmas): 
         '''
             x: [batch,seq],
@@ -102,18 +101,16 @@ class net(nn.Module):
         sigmas = self.time_emb(sigmas.unsqueeze(-1))
         sigmas = self.map_layers(sigmas)
         # Condition Mapping
-
-        x = x.reshape(x.size(0), 1000, 240)
         
+        x = x.reshape(x.size(0), 1000, 480)        
         x = self.encoder(x)
         
         for trans in self.transformer:
             x = trans(x,sigmas)
 
         x = self.decoder(x)
-        x = self.act(x)
-        x = self.out(x)
-        
+  
+        x = self.last(x)
        
         return x.reshape(x.size(0),-1)
     

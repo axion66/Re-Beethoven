@@ -2,20 +2,20 @@ fft_setup:
   n_fft: 512
   win_len: 512
   hop_length: 256
-  seq_len: 240000
-  overlap_ratio: 64
+  seq_len: 480000
+  overlap_ratio: 128
   cut_first: 24000
   sr: 24000
-  num_test_samples: 4
-  num_blocks: 8
+  num_test_samples: 8
+  num_blocks: 12
   activation_fn: "xATLU"
   norm_fn: "LayerNorm"
   dropout: 0.1
 model_param:
-  epoch: 10000
-  device: "cpu"
+  epoch: 100
+  device: "cuda:0"
   batch_size: 8
-  lr: 0.0003
+  lr: 0.00025
 
 file_path:
   audio_folder: "../dataset"

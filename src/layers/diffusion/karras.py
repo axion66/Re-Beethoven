@@ -15,7 +15,7 @@ class Denoiser(nn.Module):
         model: nn.Module,
         sigma_data: float=0.5,  # data distribution standard deviation
         sigma_min=0.005,
-        sigma_max=2, # paper suggests 80, but I will go with 3
+        sigma_max=1, # paper suggests 80, but I will go with 3
         rho: float = 3.0, # for image, set it 7
         s_churn: float = 40.0, # controls stochasticity(SDE)  0 for deterministic(ODE)
         s_tmin: float = 0.05, # I need to find with grid search, but who wants to do that..
@@ -68,7 +68,8 @@ class Denoiser(nn.Module):
 
         b, device = x.shape[0], x.device
         sigmas = self.sigma_noise(num_samples=b)
-        noise = torch.randn_like(x) * sigmas 
+
+        noise = torch.randn_like(x) * sigmas
         x_noised = x + noise
         x_denoised = self.denoise_fn(x_noised, sigmas=sigmas)
         x_denoised = (x_denoised * x_std / self.sigma_data) + x_mean
@@ -80,7 +81,7 @@ class Denoiser(nn.Module):
         weight = (sigmas ** 2 + self.sigma_data ** 2) / (sigmas * self.sigma_data) ** 2
         loss = weight * ((x_denoised - x)**2)
 
-        return loss.sum()
+        return loss.mean()
 
     # sampling part
     @torch.no_grad()
