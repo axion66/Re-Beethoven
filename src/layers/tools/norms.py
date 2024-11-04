@@ -4,6 +4,7 @@ from typing import Optional
 
 class LayerNorm(nn.Module):
     def __init__(self,dim):
+        super().__init__()
         self.ln = nn.LayerNorm(dim,eps=1e-7)
 
     def forward(self,x):

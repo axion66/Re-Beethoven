@@ -1,19 +1,20 @@
 fft_setup:
-  n_fft: 2048
-  win_len: 2048
-  hop_length: 1024
-  seq_len: 327680
-  overlap_ratio: 256
-  cut_first: 10240
-  sr: 10240
+  n_fft: 512
+  win_len: 512
+  hop_length: 256
+  seq_len: 240000
+  overlap_ratio: 64
+  cut_first: 24000
+  sr: 24000
   num_test_samples: 4
-  num_blocks: 12
+  num_blocks: 8
   activation_fn: "xATLU"
   norm_fn: "LayerNorm"
+  dropout: 0.1
 model_param:
   epoch: 10000
   device: "cpu"
-  batch_size: 16
+  batch_size: 8
   lr: 0.0003
 
 file_path:

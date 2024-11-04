@@ -2,7 +2,6 @@ import os
 import yaml
 import torch
 import torch.nn as nn
-from layers.core import net
 from layers.diffusion.karras import Denoiser
 from torch.optim import Adam
 from layers.preprocess import load_mp3_files, create_overlapping_chunks_tensor
@@ -13,7 +12,10 @@ import matplotlib.pyplot as plt
 import soundfile as sf  # For saving audio files
 from tqdm import tqdm
 import argparse
-
+#from layers.core_cnn_STFT import net
+from layers.core_raw import net
+#from layers.core_WavTokenizer import net
+#from layers.core_UNet import UNetWithMHA
 
 
 class Trainer:
@@ -25,7 +27,7 @@ class Trainer:
 
         self.net = net(self.fft_setup)
         self.model = Denoiser(model=self.net, sigma_data=0.5,device=torch.device(self.model_param['device'])).to(self.model_param['device'])
-        self.model_optimizer = Adam(self.net.parameters(), lr=self.model_param['lr'], betas=(0.9, 0.95), weight_decay=0.1)
+        self.model_optimizer = Adam(self.net.parameters(), lr=self.model_param['lr'], betas=(0.9, 0.999), weight_decay=0.1)
 
         self.train_losses = []
         self.eval_losses = []
@@ -61,15 +63,17 @@ class Trainer:
         os.makedirs(LOG_DIR, exist_ok=True)
 
         for epoch in range(self.model_param['epoch']):
-            self.model.train()
+            self.net.train()
             epoch_losses = []
 
             for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{EPOCH}")):
                 self.model_optimizer.zero_grad()
                 x = x[0].to(self.model_param['device'])
-                x_denoised, sigmas = self.model(x,)
+     
+                x_denoised, sigmas = self.model(x)
                 loss = self.model.loss_fn(x, x_denoised, sigmas)
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=5.0)
                 self.model_optimizer.step()
 
                 epoch_losses.append(loss.item())
@@ -83,6 +87,7 @@ class Trainer:
             print(f"Epoch {epoch+1}/{EPOCH}, Average Train Loss: {avg_train_loss:.4f}")
             
             if (epoch + 1) % 10 == 0:
+                self.net.eval()
                 eval_loss = self.evaluate(self.test_loader)
                 self.eval_losses.append(eval_loss)
                 wandb.log({"eval_loss": eval_loss})

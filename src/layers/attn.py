@@ -5,11 +5,14 @@ import torch.nn.functional as F
 #from flash_attn import flash_attn_func #pip install flash-attn --no-build-isolation
 from rotary_embedding_torch import RotaryEmbedding
 from layers.tools.utils import *
+from layers.tools.activations import *
+from layers.tools.norms import *
 try:
     from flash_attn import flash_attn_func
+    FLASH_ON = True
 except:
     print("Flash attention not supported. try revising the code")
-from tools.norms import RMSNorm,LayerNorm
+    FLASH_ON = False
 
 
 
@@ -125,11 +128,12 @@ class DiffMHAFlash(nn.Module):
         k = k.reshape(b, seq_len, self.num_heads, 2, self.head_dim)
         q1, q2 = q[:, :, :, 0], q[:, :, :, 1] 
         k1, k2 = k[:, :, :, 0], k[:, :, :, 1]
-        sigmas = sigmas.unsqueeze(1).unsqueeze(2)   # batch,1,1,head_dim
-        
+        sigmas = sigmas.unsqueeze(1)   # batch,1,1,head_dim
+
         # Differential Attention
-        attn1 = flash_attn_func(q1, k1, v, casual=True)
-        attn2 = flash_attn_func(self.ln_qkv2(q2 + sigmas), self.ln_qkv2(k2 + sigmas), v, casual=True)
+        attn1 = flash_attn_func(q1, k1, v, casual=True) if FLASH_ON else self.qkv_attn(q1,k1,v)
+        attn2 = flash_attn_func(self.ln_qkv2(q2 + sigmas), self.ln_qkv2(k2 + sigmas), v, casual=True) if FLASH_ON else self.qkv_attn(self.ln_qkv2(q2 + sigmas), self.ln_qkv2(k2 + sigmas), v)
+        
         attn = self.ln(attn1 - self.lmd(q) * attn2) * (1 - self.lambda_init)
 
         # Reshape and Linear projection
@@ -138,8 +142,8 @@ class DiffMHAFlash(nn.Module):
     
     
 
-    '''
-    def scaled_dot_product_attention(self, q, k, v, mask=None):
+    
+    def qkv_attn(self, q, k, v):
         """
         Compute the scaled dot-product attention.
         Created By GPT for debugging in non-gpu(non-flashattn) purpose only
@@ -155,13 +159,10 @@ class DiffMHAFlash(nn.Module):
         """
         # Calculate the attention scores
         scores = torch.matmul(q, k.transpose(-2, -1))  # Shape: (batch_size, seq_len, num_heads, seq_len)
-        scaling_factor = self.head_dim ** 0.25
-        scores = scores / scaling_factor
+        scaling_factor = self.head_dim ** -0.5
+        scores = scores * scaling_factor
 
-        # Apply the mask (if provided)
-        if mask is not None:
-            scores = scores.masked_fill(mask == 0, float('-inf'))
-
+      
         # Compute the attention weights
         attention_weights = F.softmax(scores, dim=-1)  # Shape: (batch_size, seq_len, num_heads, seq_len)
 
@@ -169,5 +170,5 @@ class DiffMHAFlash(nn.Module):
         output = torch.matmul(attention_weights, v)  # Shape: (batch_size, seq_len, num_heads, head_dim)
 
         return output
-    '''
+    
 
