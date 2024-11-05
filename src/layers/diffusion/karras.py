@@ -13,7 +13,7 @@ class Denoiser(nn.Module):
     def __init__(
         self,
         model: nn.Module,
-        sigma_data: float=0.5,  # data distribution standard deviation
+        sigma_data: float=1,  # data distribution standard deviation
         sigma_min=0.005,
         sigma_max=1, # paper suggests 80, but I will go with 3
         rho: float = 3.0, # for image, set it 7
@@ -40,49 +40,63 @@ class Denoiser(nn.Module):
         self.s_noise = s_noise
 
     
-    def denoise_fn(
-        self,
-        x_noised: Tensor,
-        sigmas: Tensor,
-    ) -> Tensor:
-        
+
+    def get_scalings(self,sigmas):
         c_skip = (self.sigma_data ** 2) / (sigmas**2 + self.sigma_data**2)
         c_out = sigmas * self.sigma_data / ((sigmas**2 + self.sigma_data**2) ** 0.5) 
         c_in = 1 / ((sigmas**2 + self.sigma_data**2) ** 0.5) 
         c_noise = sigmas.log() / 4 
+        return c_skip,c_out,c_in,c_noise
 
 
-        new_x = self.model(x_noised, sigmas)#self.model(c_in * x_noised, c_noise)
-        #x_denoised = c_skip * x_noised + c_out * new_x
+    def append_dims(self,x, target_dims):
+        """Appends dimensions to the end of a tensor until it has target_dims dimensions."""
+        dims_to_append = target_dims - x.ndim
+        if dims_to_append < 0:
+            raise ValueError(f'input has {x.ndim} dims but target_dims is {target_dims}, which is less')
+        return x[(...,) + (None,) * dims_to_append]
 
-        return new_x
-
- 
 
     def forward(self, x: Tensor) -> Tensor:
         # std transformation & RevIN
         # x: batch, audio_length
-        x_std = x.std(dim=-1,keepdim=True)
-        x_mean = x.mean(dim=-1,keepdim=True)
-        x = (x - x_mean) * self.sigma_data / x_std
-
         b, device = x.shape[0], x.device
+
+
+        # noise
         sigmas = self.sigma_noise(num_samples=b)
+        x_noised = x + (torch.randn_like(x) * sigmas) # randn_like * sigmas == noise
 
-        noise = torch.randn_like(x) * sigmas
-        x_noised = x + noise
-        x_denoised = self.denoise_fn(x_noised, sigmas=sigmas)
-        x_denoised = (x_denoised * x_std / self.sigma_data) + x_mean
+        c_skip, c_out, c_in, c_noise = [self.append_dims(x, x.ndim) for x in self.get_scalings(sigmas)]
+        x_denoised = self.model(c_in * x_noised, c_noise) * c_out + x * c_skip
+        
+        return x_denoised, sigmas
 
-        return x_denoised,sigmas
-
-    def loss_fn(self,x:Tensor,x_denoised:Tensor,sigmas:Tensor):
+    def loss_fn(self,x:Tensor):
         assert x.shape == x_denoised.shape
-        weight = (sigmas ** 2 + self.sigma_data ** 2) / (sigmas * self.sigma_data) ** 2
-        print(f"weight: {weight}")
-        loss = weight * ((x_denoised - x)**2)
-        print(f"loss: {loss}, w/o weight: {loss / weight}")
-        return loss.mean()
+ 
+        b, device = x.shape[0], x.device
+
+ 
+        # noise
+        sigmas = self.sigma_noise(num_samples=b)
+        x_noised = x + (torch.randn_like(x) * sigmas) # randn_like * sigmas == noise
+
+
+        c_skip, c_out, c_in, c_noise = [self.append_dims(x, x.ndim) for x in self.get_scalings(sigmas)]
+        x_denoised = self.model(c_in * x_noised, c_noise)#   * c_out + x * c_skip -> replaced by changing original x.
+        x = (x - c_skip * x_noised) / c_out # instead of transforming the x_denoised, we transform the original x.
+
+        loss = self._weighting_snr(sigmas) * ((x_denoised - x)**2)
+
+        print(f"weight: {self._weighting_snr(sigmas)} \n loss: {loss}, \n w/o weight: {loss / self._weighting_snr(sigmas)}")
+        return loss.flatten(-1).mean(1)
+
+
+    def _weighting_snr(self, sigmas):
+        #return (sigmas ** 2 + self.sigma_data ** 2) / (sigmas * self.sigma_data) ** 2 -> crazy-level magnitude.(0.5 to 1000)
+        return self.sigma_data ** 2 / (sigmas ** 2 + self.sigma_data ** 2) #(snr)
+        #return 1
 
     # sampling part
     @torch.no_grad()
@@ -124,6 +138,8 @@ class Denoiser(nn.Module):
         schuduled_sigmas = torch.cat((schuduled_sigmas,schuduled_sigmas.new_zeros([1])))
         return schuduled_sigmas
 
+  
+
     @torch.no_grad()
     def _heun_method(
         self,
@@ -135,12 +151,12 @@ class Denoiser(nn.Module):
         epsilon = (self.s_noise**2) * torch.randn_like(x)
         sigma_hat = sigma * (1 + gamma)
         x_hat = x + (sigma_hat ** 2 - sigma ** 2)**0.5 * epsilon
-        d = (x_hat - self.denoise_fn(x_hat, sigma_hat)) / sigma_hat
+        d = (x_hat - self.forward(x_hat, sigma_hat)[0]) / sigma_hat
         x_next = x_hat + (sigma_next - sigma_hat) * d
         if sigma_next.values != 0:
             # Create a sigma_next tensor of the same shape as x
 
-            model_out_next = self.denoise_fn(x_next, sigma_next)
+            model_out_next = self.forward(x_next, sigma_next)[0]
             d_prime = (x_next - model_out_next) / sigma_next
             x_next = x_hat + (sigma_next - sigma_hat) * 0.5 * (d + d_prime)
         
