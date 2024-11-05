@@ -1,3 +1,7 @@
 /src/models/*
 **/__pycache__/
 src/pretrained_models/
+
+dataset/train_data
+dataset/train_labels
+dataset_test/
