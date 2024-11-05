@@ -8,7 +8,7 @@ from layers.tools.utils import *
 from layers.attn import TransformerBlock
 from layers.cnn import Encoder,Decoder,ResBlock
 from layers.tools.activations import get_activation_fn
-from layers.tools.norms import get_norm_fn
+from layers.tools.norms import get_norm_fn,RMSNorm
 #from nnAudio.features import STFT,iSTFT
 
 class FourierFeatures(nn.Module):
@@ -64,7 +64,7 @@ class net(nn.Module):
         super().__init__()
         self.config = config
         self.sequence_length = config['seq_len']                                                # Raw sequence length
-        self.seq_len,self.embed_dim = 1000,480 # for 240,000 length(10sec) audio
+        self.seq_len,self.embed_dim = 1000,16 # for 240,000 length(10sec) audio
         self.num_blocks = config['num_blocks']                                                  # Number of Transformer blocks
         activation_fn = get_activation_fn(config['activation_fn'],in_chn=self.embed_dim)
         norm_fn = get_norm_fn(config['norm_fn'])
@@ -92,17 +92,52 @@ class net(nn.Module):
                               activation_fn=activation_fn,
                               norm_fn=norm_fn,
                               dropout=p)
+        
+
+        self.sigma_data = 0.5
+        self.rms = RMSNorm(d=self.embed_dim)
     def forward(self,x,sigmas): 
         '''
             x: [batch,seq],
             sigmas: [batch]
         '''
         # Condition Mapping (Timestamp)
+        x_noised = x
+
+        print(f"x_noised.mean(): {x.mean()}")
+        print(f"x_noised.std(): {x.std()}")
+
+        c_skip = (self.sigma_data ** 2) / (sigmas**2 + self.sigma_data**2)
+        print(f"c_skip.mean(): {c_skip.mean()}")
+        print(f"c_skip.std(): {c_skip.std()}")
+
+        c_out = sigmas * self.sigma_data / ((sigmas**2 + self.sigma_data**2) ** 0.5)
+        print(f"c_out.mean(): {c_out.mean()}")
+        print(f"c_out.std(): {c_out.std()}")
+
+        c_in = 1 / ((sigmas**2 + self.sigma_data**2) ** 0.5)
+        print(f"c_in.mean(): {c_in.mean()}")
+        print(f"c_in.std(): {c_in.std()}")
+
+        c_noise = sigmas.log() / 4
+        print(f"c_noise.mean(): {c_noise.mean()}")
+        print(f"c_noise.std(): {c_noise.std()}")
+
+        x = c_in * x
+        print(f"x.mean(): {x.mean()}")
+        print(f"x.std(): {x.std()}")
+
+        sigmas = c_noise
+        print(f"sigmas.mean(): {sigmas.mean()}")
+        print(f"sigmas.std(): {sigmas.std()}")
+
         sigmas = self.time_emb(sigmas.unsqueeze(-1))
         sigmas = self.map_layers(sigmas)
         # Condition Mapping
         
-        x = x.reshape(x.size(0), 1000, 480)        
+        x = x.reshape(x.size(0), self.seq_len, self.embed_dim)        
+
+        x = self.ln123(x)
         x = self.encoder(x)
         
         for trans in self.transformer:
@@ -110,9 +145,13 @@ class net(nn.Module):
 
         x = self.decoder(x)
   
+        x = x.transpose(-1,-2)
         x = self.last(x)
-       
-        return x.reshape(x.size(0),-1)
+        x = x.transpose(-1,-2)
+
+
+        new_x = x.reshape(x.size(0),-1)
+        return c_skip * x_noised + c_out * new_x
     
 
 

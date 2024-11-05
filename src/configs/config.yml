@@ -2,10 +2,10 @@ fft_setup:
   n_fft: 512
   win_len: 512
   hop_length: 256
-  seq_len: 480000
-  overlap_ratio: 128
-  cut_first: 24000
-  sr: 24000
+  seq_len: 16000
+  overlap_ratio: 2
+  cut_first: 8000
+  sr: 8000
   num_test_samples: 8
   num_blocks: 12
   activation_fn: "xATLU"

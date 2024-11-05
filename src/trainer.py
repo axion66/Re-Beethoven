@@ -155,8 +155,7 @@ class Trainer:
 
         BATCH_SIZE = self.model_param['batch_size']
         trainDataset, testDataset = TensorDataset(dSet['x']), TensorDataset(dSet['x_test'])
-        dLoader, dLoader_test = DataLoader(trainDataset, batch_size=BATCH_SIZE, shuffle=True), DataLoader(testDataset, batch_size=BATCH_SIZE, shuffle=False)
-
+        dLoader, dLoader_test = DataLoader(trainDataset, batch_size=BATCH_SIZE, shuffle=True,num_workers=2), DataLoader(testDataset, batch_size=BATCH_SIZE, shuffle=False,num_workers=2)
         return dLoader, dLoader_test
 
 

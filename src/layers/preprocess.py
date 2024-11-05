@@ -41,7 +41,8 @@ def resample(waveform:T, orig_sr:int,new_sr:int,kaisier_best=True):
 def load_audio(filepath:str,config):
     waveform, sr = torchaudio.load(filepath)
     waveform = stereo_to_mono(waveform,dim=-1)
-    waveform = resample(waveform,sr,config['sr'])
+    if (sr != config['sr']):
+        waveform = resample(waveform,sr,config['sr'])
     waveform = divide(waveform,n=config['hop_length'],cut_first=config['cut_first'])
     return waveform
 
@@ -49,7 +50,7 @@ def load_mp3_files(base_folder:str,config):
     audio_tensors = []
     for root, _, files in os.walk(base_folder):
         for file in files:
-            if file.endswith(".mp3" or ".wav"):
+            if file.endswith(".mp3") or file.endswith(".wav"):
                 file_path = os.path.join(root, file)
                 waveform = load_audio(file_path,config)
                 audio_tensors.append(waveform)

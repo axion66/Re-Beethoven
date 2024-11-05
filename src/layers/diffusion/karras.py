@@ -52,10 +52,10 @@ class Denoiser(nn.Module):
         c_noise = sigmas.log() / 4 
 
 
-        new_x = self.model(c_in * x_noised, c_noise)
-        x_denoised = c_skip * x_noised + c_out * new_x
+        new_x = self.model(x_noised, sigmas)#self.model(c_in * x_noised, c_noise)
+        #x_denoised = c_skip * x_noised + c_out * new_x
 
-        return x_denoised
+        return new_x
 
  
 
@@ -79,8 +79,9 @@ class Denoiser(nn.Module):
     def loss_fn(self,x:Tensor,x_denoised:Tensor,sigmas:Tensor):
         assert x.shape == x_denoised.shape
         weight = (sigmas ** 2 + self.sigma_data ** 2) / (sigmas * self.sigma_data) ** 2
+        print(f"weight: {weight}")
         loss = weight * ((x_denoised - x)**2)
-
+        print(f"loss: {loss}, w/o weight: {loss / weight}")
         return loss.mean()
 
     # sampling part
