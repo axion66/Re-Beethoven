@@ -84,7 +84,7 @@ class Trainer:
 
             print(f"Epoch {epoch+1}/{EPOCH}, Average Train Loss: {avg_train_loss:.4f}")
             
-            if (epoch + 1) % 10 == 0:
+            if (epoch + 1) % 2 == 0:
                 self.net.eval()
                 eval_loss = self.evaluate(self.test_loader)
                 self.eval_losses.append(eval_loss)
@@ -112,13 +112,13 @@ class Trainer:
 
     def evaluate(self, test_loader):
         self.model.eval()
-        total_loss = 0
+        total_loss = []
         with torch.no_grad():
             for x in test_loader:
                 x = x[0].to(self.model_param['device']) # list to TEnsor
                 loss = self.model.loss_fn(x)
-                total_loss += loss.item()
-        return total_loss / len(total_loss)
+                total_loss.append(loss.item())
+        return sum(total_loss) / len(total_loss)
 
     def plot_losses(self, log_dir):
         plt.figure(figsize=(10, 5))

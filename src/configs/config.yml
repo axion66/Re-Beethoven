@@ -2,8 +2,8 @@ fft_setup:
   n_fft: 512
   win_len: 512
   hop_length: 256
-  seq_len: 16000
-  overlap_ratio: 2
+  seq_len: 40000
+  overlap_ratio: 8
   cut_first: 8000
   sr: 8000
   num_test_samples: 8
@@ -12,7 +12,7 @@ fft_setup:
   norm_fn: "LayerNorm"
   dropout: 0.1
 model_param:
-  epoch: 100
+  epoch: 1000
   device: "cuda:0"
   batch_size: 8
   lr: 0.00025

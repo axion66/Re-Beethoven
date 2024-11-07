@@ -10,7 +10,16 @@ from layers.cnn import Encoder,Decoder,ResBlock
 from layers.tools.activations import get_activation_fn
 from layers.tools.norms import get_norm_fn
 #from nnAudio.features import STFT,iSTFT
-
+from mamba_ssm import Mamba2
+model = Mamba2(
+    # This module uses roughly 3 * expand * d_model^2 parameters
+    d_model=dim, # Model dimension d_model
+    d_state=64,  # SSM state expansion factor, typically 64 or 128
+    d_conv=4,    # Local convolution width
+    expand=2,    # Block expansion factor
+).to("cuda")
+y = model(x)
+assert y.shape == x.shape
 class FourierFeatures(nn.Module):
     # from NCSN++.
     def __init__(self, in_features, out_features, std=1.):
@@ -64,7 +73,7 @@ class net(nn.Module):
         super().__init__()
         self.config = config
         self.sequence_length = config['seq_len']                                                # Raw sequence length
-        self.seq_len,self.embed_dim = 1000,16 # for 240,000 length(10sec) audio
+        self.seq_len,self.embed_dim = 1000,480 # for 240,000 length(10sec) audio
         self.num_blocks = config['num_blocks']                                                  # Number of Transformer blocks
         activation_fn = get_activation_fn(config['activation_fn'],in_chn=self.embed_dim)
         norm_fn = get_norm_fn(config['norm_fn'])
@@ -72,19 +81,19 @@ class net(nn.Module):
           
         
         # Mapping Net
-        self.time_emb = FourierFeatures(1, 512//8//2)
+        self.time_emb = FourierFeatures(1, 512//16//2)
         self.map_layers = nn.Sequential(
-            Linear(512//8//2, 512//8//2), # head_dim
+            Linear(512//16//2, 512//16//2), # head_dim
             activation_fn,
-            Linear(512//8//2,512//8//2),
+            Linear(512//16//2,512//16//2),
             activation_fn,
-            Linear(512//8//2,512//8//2)
+            Linear(512//16//2,512//16//2)
         )
 
         self.encoder = Encoder(channels=[self.embed_dim,512,512],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
         self.decoder = Decoder(channels=[512,512,self.embed_dim],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
         self.transformer = nn.ModuleList(
-            [TransformerBlock(embed_dim=512, depth=i + 1, num_heads=8,activation_fn=activation_fn,norm_fn=norm_fn) for i in range(self.num_blocks)]
+            [TransformerBlock(embed_dim=512, depth=i + 1, num_heads=16,activation_fn=activation_fn,norm_fn=norm_fn) for i in range(self.num_blocks)]
         )
     
         self.last = ResBlock(channels=self.embed_dim,

@@ -15,7 +15,7 @@ class Denoiser(nn.Module):
         model: nn.Module,
         sigma_data: float=1,  # data distribution standard deviation
         sigma_min=0.005,
-        sigma_max=1, # paper suggests 80, but I will go with 3
+        sigma_max=4, # paper suggests 80, but I will go with 3
         rho: float = 3.0, # for image, set it 7
         s_churn: float = 40.0, # controls stochasticity(SDE)  0 for deterministic(ODE)
         s_tmin: float = 0.05, # I need to find with grid search, but who wants to do that..
@@ -57,14 +57,15 @@ class Denoiser(nn.Module):
         return x[(...,) + (None,) * dims_to_append]
 
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor,sigmas=None) -> Tensor:
         # std transformation & RevIN
         # x: batch, audio_length
         b, device = x.shape[0], x.device
 
 
         # noise
-        sigmas = self.sigma_noise(num_samples=b)
+        if sigmas is None:
+            sigmas = self.sigma_noise(num_samples=b)
         x_noised = x + (torch.randn_like(x) * sigmas) # randn_like * sigmas == noise
 
         c_skip, c_out, c_in, c_noise = [self.append_dims(x, x.ndim) for x in self.get_scalings(sigmas)]
@@ -73,7 +74,6 @@ class Denoiser(nn.Module):
         return x_denoised, sigmas
 
     def loss_fn(self,x:Tensor):
-        assert x.shape == x_denoised.shape
  
         b, device = x.shape[0], x.device
 
@@ -88,9 +88,8 @@ class Denoiser(nn.Module):
         x = (x - c_skip * x_noised) / c_out # instead of transforming the x_denoised, we transform the original x.
 
         loss = self._weighting_snr(sigmas) * ((x_denoised - x)**2)
-
         print(f"weight: {self._weighting_snr(sigmas)} \n loss: {loss}, \n w/o weight: {loss / self._weighting_snr(sigmas)}")
-        return loss.flatten(-1).mean(1)
+        return loss.reshape(-1).mean()
 
 
     def _weighting_snr(self, sigmas):
