@@ -14,9 +14,9 @@ class Denoiser(nn.Module):
         self,
         model: nn.Module,
         sigma_data: float=1,  # data distribution standard deviation
-        sigma_min=0.005,
-        sigma_max=4, # paper suggests 80, but I will go with 3
-        rho: float = 3.0, # for image, set it 7
+        sigma_min=0.002,
+        sigma_max=80, # paper suggests 80, but I will go with 3
+        rho: float = 4.0, # for image, set it 7
         s_churn: float = 40.0, # controls stochasticity(SDE)  0 for deterministic(ODE)
         s_tmin: float = 0.05, # I need to find with grid search, but who wants to do that..
         s_tmax: float = 1e+8, # Figure 15 (yellow line)
@@ -88,7 +88,7 @@ class Denoiser(nn.Module):
         x = (x - c_skip * x_noised) / c_out # instead of transforming the x_denoised, we transform the original x.
 
         loss = self._weighting_snr(sigmas) * ((x_denoised - x)**2)
-        print(f"weight: {self._weighting_snr(sigmas)} \n loss: {loss}, \n w/o weight: {loss / self._weighting_snr(sigmas)}")
+        #print(f"weight: {self._weighting_snr(sigmas)} \n loss: {loss}, \n w/o weight: {loss / self._weighting_snr(sigmas)}")
         return loss.reshape(-1).mean()
 
 
