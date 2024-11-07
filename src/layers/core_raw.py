@@ -81,8 +81,26 @@ class net(nn.Module):
             Linear(64//4//2,64//4//2)
         )
 
-        self.encoder = Encoder(channels=[self.embed_dim,128,64,64],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
-        self.decoder = Decoder(channels=[64,64,128,self.embed_dim],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
+        # TODO: apply Mamba
+        self.encoder = nn.Sequential(
+            PositionwiseFeedForward(dims=self.embed_dim,
+                                    activation=activation_fn,
+                                    dropout=p,
+                                    ),
+            activation_fn,
+            nn.Linear(self.embed_dim,64)
+        )
+        #Encoder(channels=[self.embed_dim,128,64,64],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
+        self.decoder = nn.Sequential(
+            nn.Linear(64,self.embed_dim),
+            activation_fn,
+            PositionwiseFeedForward(dims=self.embed_dim,
+                                    activation=activation_fn,
+                                    dropout=p,
+                                    ),
+        )
+
+        #Decoder(channels=[64,64,128,self.embed_dim],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
         self.transformer = nn.ModuleList(
             [TransformerBlock(embed_dim=64, depth=i + 1, num_heads=4,activation_fn=activation_fn,norm_fn=norm_fn) for i in range(self.num_blocks)]
         )

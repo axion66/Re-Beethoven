@@ -2,8 +2,8 @@ torchaudio
 torch==2.4
 scipy
 rotary-embedding-torch
-flash-attn
 einops
 wandb
 matplotlib
 soundfile
+flash-attn
