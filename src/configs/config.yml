@@ -1,4 +1,4 @@
-fft_setup:
+fft:
   n_fft: 512
   win_len: 512
   hop_length: 256
@@ -6,17 +6,21 @@ fft_setup:
   overlap_ratio: 4
   cut_first: 4000
   sr: 8000
-  num_test_samples: 8
   num_blocks: 12
   activation_fn: "xATLU"
   norm_fn: "RMSNorm"
   dropout: 0.2
-model_param:
+  num_evaluation: 16
+model:
   epoch: 1000
   device: "cuda:0"
-  batch_size: 256
+  batch_size: 64
   lr: 0.0003
-
-file_path:
+  warmup_period: 4000,
+  num_workers: 14
+  evaluation_cycle: 15
+  sampling_steps: 100
+  num_samples: 4
+file:
   audio_folder: "../dataset"
   log_dir: "./train_log/"
