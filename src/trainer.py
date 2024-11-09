@@ -121,11 +121,13 @@ class Trainer:
                     torch.save(self.model.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
 
                 STORE_SAMPLE_DIR = os.path.join(LOG_DIR, f"samples_epoch_{epoch+1}")
-                self.generate_samples(
-                    num_samples=self.MODEL_CFG['num_samples'],
-                    num_steps=self.MODEL_CFG['sampling_steps'],
-                    output_dir=STORE_SAMPLE_DIR
-                )
+                for idx in range(self.MODEL_CFG['num_samples']):
+                    self.generate_samples(
+                        num_samples=1,#self.MODEL_CFG['num_samples'],
+                        num_steps=self.MODEL_CFG['sampling_steps'][idx],
+                        output_dir=STORE_SAMPLE_DIR,
+                        idx=idx
+                    )
 
                 for i in range(self.MODEL_CFG['num_samples']):
                     sample_path = os.path.join(STORE_SAMPLE_DIR, f"Sample_{i}.wav")
@@ -156,7 +158,8 @@ class Trainer:
             self,
             num_samples: int,
             num_steps: int,
-            output_dir: str
+            output_dir: str,
+            idx: int
         ) -> None:
         os.makedirs(output_dir, exist_ok=True)
 
@@ -165,7 +168,7 @@ class Trainer:
 
         for i in range(num_samples):
             sample = generated_samples[i].cpu().numpy().flatten()
-            filename = os.path.join(output_dir, f"Sample_{i}.wav")
+            filename = os.path.join(output_dir, f"Sample_{idx}.wav")
             sf.write(filename, sample, self.FFT_CFG['sr'])
 
         print(f"Generated {num_samples} samples and saved to {output_dir}")

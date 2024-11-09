@@ -72,24 +72,25 @@ class net(nn.Module):
           
         
         # Mapping Net
-        self.time_emb = FourierFeatures(1, 512//4//2)
+        self.time_emb = FourierFeatures(1, 64//4//2)
         self.map_layers = nn.Sequential(
-            Linear(512//4//2, 512//4//2), # head_dim
+            Linear(64//4//2, 64//4//2), # head_dim
             activation_fn,
-            Linear(512//4//2,512//4//2),
+            Linear(64//4//2,64//4//2),
             activation_fn,
-            Linear(512//4//2,512//4//2)
+            Linear(64//4//2,64//4//2)
         )
 
-        self.encoder = BiMambaBlock(dim=self.embed_dim,norm_fn=norm_fn,activation_fn=activation_fn,p=p)
-        self.decoder = BiMambaBlock(dim=self.embed_dim,norm_fn=norm_fn,activation_fn=activation_fn,p=p)
-
+        #self.encoder = BiMambaBlock(dim=self.embed_dim,norm_fn=norm_fn,activation_fn=activation_fn,p=p)
+        #self.decoder = BiMambaBlock(dim=self.embed_dim,norm_fn=norm_fn,activation_fn=activation_fn,p=p)
+        self.encoder = Encoder(channels=[self.embed_dim,128,64,64],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
+        self.decoder = Decoder(channels=[64,64,128,self.embed_dim],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
         self.transformer = nn.ModuleList(
-            [TransformerBlock(embed_dim=self.embed_dim, depth=i + 1, num_heads=4,activation_fn=activation_fn,norm_fn=norm_fn) for i in range(self.num_blocks)]
+            [TransformerBlock(embed_dim=64, depth=i + 1, num_heads=4,activation_fn=activation_fn,norm_fn=norm_fn) for i in range(self.num_blocks)]
         )
     
   
-
+        self.last = ResBlock(channels=self.embed_dim,norm_fn=norm_fn,activation_fn=activation_fn,dropout=0)
 
     def forward(self,x,sigmas): 
         '''
@@ -110,9 +111,9 @@ class net(nn.Module):
 
         x = self.decoder(x)
   
-        #x = x.transpose(-1,-2)
-        #x = self.last(x)
-        #x = x.transpose(-1,-2)
+        x = x.transpose(-1,-2)
+        x = self.last(x)
+        x = x.transpose(-1,-2)
 
 
         return x.reshape(x.size(0),-1)
