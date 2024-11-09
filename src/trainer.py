@@ -24,7 +24,7 @@ class Trainer:
         
         '''CONFIG'''
         with open(cfg_path) as stream:
-            self.BASE_CFG = yaml.safe_load(stream)
+            self.cfg = yaml.safe_load(stream)
             self.FFT_CFG = self.cfg['fft']
             self.MODEL_CFG = self.cfg['model']
             self.FILE_CFG = self.cfg['file']
@@ -66,6 +66,11 @@ class Trainer:
         return optimizer,lr_scheduler,warmup_scheduler
  
     def train(self):
+        for name, param in self.net.named_parameters():
+            print(f"Layer: {name} | Size: {param.size()}") 
+        total_params = sum(p.numel() for p in self.net.parameters() if p.requires_grad)  
+        print(f"Total trainable parameters: {total_params:,}")
+        
         EPOCH = self.MODEL_CFG['epoch']
         LOG_DIR = self.FILE_CFG['log_dir']
         os.makedirs(LOG_DIR, exist_ok=True)
@@ -88,7 +93,7 @@ class Trainer:
                 
                 # Timestamp Loss, LR
                 EPOCH_LOSS.append(loss.item())
-                wandb.log({"timestamp_loss": loss.item(), "lr": self.model_optimizer.param_groups[0]['lr']})
+                wandb.log({"timestamp_loss": loss.item(), "lr": self.optim.param_groups[0]['lr']})
 
             # Epoch Loss
             avg_train_loss = sum(EPOCH_LOSS) / len(EPOCH_LOSS)

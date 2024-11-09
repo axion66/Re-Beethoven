@@ -13,10 +13,10 @@ class Denoiser(nn.Module):
     def __init__(
         self,
         model: nn.Module,
-        sigma_data: float=1,  # data distribution standard deviation
+        sigma_data: float=0.5,  # data distribution standard deviation
         sigma_min=0.002,
-        sigma_max=80, # paper suggests 80, but I will go with 3
-        rho: float = 4.0, # for image, set it 7
+        sigma_max=1, # paper suggests 80, but I will go with 3
+        rho: float = 7.0, # for image, set it 7
         s_churn: float = 40.0, # controls stochasticity(SDE)  0 for deterministic(ODE)
         s_tmin: float = 0.05, # I need to find with grid search, but who wants to do that..
         s_tmax: float = 1e+8, # Figure 15 (yellow line)
@@ -29,7 +29,6 @@ class Denoiser(nn.Module):
         self.sigma_data = sigma_data
         self.sigma_noise = lambda num_samples: (torch.randn((num_samples,1),device=device) * 1.2 - 1.2).exp()
         #torch.normal(-1.2,1.2,size=(num_samples,),device=device).exp()
-        self.sigma_data = sigma_data
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max # Too high.
         self.rho = rho
@@ -62,7 +61,11 @@ class Denoiser(nn.Module):
         # x: batch, audio_length
         b, device = x.shape[0], x.device
 
+        #std 
+        x_mean,x_std = x.mean(dim=-1),x.std(dim=-1)
+        x = (x - x_mean) * self.sigma_data / x_std
 
+        
         # noise
         if sigmas is None:
             sigmas = self.sigma_noise(num_samples=b)
@@ -71,13 +74,18 @@ class Denoiser(nn.Module):
         c_skip, c_out, c_in, c_noise = [self.append_dims(x, x.ndim) for x in self.get_scalings(sigmas)]
         x_denoised = self.model(c_in * x_noised, c_noise) * c_out + x * c_skip
         
+        #std
+        x_denoised = x_denoised * x_std / self.sigma_data + x_mean
         return x_denoised, sigmas
 
     def loss_fn(self,x:Tensor):
  
         b, device = x.shape[0], x.device
 
- 
+        # std transform
+        x_mean,x_std = x.mean(dim=-1),x.std(dim=-1)
+        x = (x - x_mean) * self.sigma_data / x_std
+            
         # noise
         sigmas = self.sigma_noise(num_samples=b)
         x_noised = x + (torch.randn_like(x) * sigmas) # randn_like * sigmas == noise
@@ -111,7 +119,7 @@ class Denoiser(nn.Module):
         x = sigmas[0] ** 2 * torch.randn((num_samples,self.model.sequence_length),device=self.device) 
         gammas = torch.where(
             (self.s_tmin <= sigmas) & (sigmas <= self.s_tmax),
-            torch.tensor(min(self.s_churn/num_steps, 0.41421356237309504)), # 0.4142 ~ sqrt(2) - 1
+            torch.tensor(min(self.s_churn/num_steps, 0.414213)), # 0.4142 ~ sqrt(2) - 1
             torch.tensor(0.0)
         )
 

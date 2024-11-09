@@ -89,7 +89,7 @@ class DiffMHAFlash(nn.Module):
                                       seq_before_head_dim=True,
                                       freqs_for='lang', 
                                       interpolate_factor=1,
-                                      cache_if_possible=True, 
+                                      cache_if_possible=False, 
                                       use_xpos=False)
     
     def reset_lambda(self,depth):

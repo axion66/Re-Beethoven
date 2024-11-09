@@ -56,5 +56,5 @@ class BiMambaBlock(nn.Module):
         )
     def forward(self,x):
         b,seq,dim = x.shape
-        x = torch.cat((self.norm_fn(self.mambaBackward(x)) + self.norm_fn(self.mambaBackward(x))),dim=-1)
+        x = torch.cat((self.norm_fn(self.mambaBackward(x)) , self.norm_fn(self.mambaBackward(x))),dim=-1)
         return self.reduce(x)

@@ -64,7 +64,7 @@ class net(nn.Module):
         super().__init__()
         self.config = config
         self.sequence_length = config['seq_len']                                                # Raw sequence length
-        self.seq_len,self.embed_dim = 1000,64 # for 240,000 length(10sec) audio
+        self.seq_len,self.embed_dim = 250,512 # for 240,000 length(10sec) audio
         self.num_blocks = config['num_blocks']                                                  # Number of Transformer blocks
         activation_fn = get_activation_fn(config['activation_fn'],in_chn=self.embed_dim)
         norm_fn = get_norm_fn(config['norm_fn'])
@@ -72,13 +72,13 @@ class net(nn.Module):
           
         
         # Mapping Net
-        self.time_emb = FourierFeatures(1, 64//4//2)
+        self.time_emb = FourierFeatures(1, 512//4//2)
         self.map_layers = nn.Sequential(
-            Linear(64//4//2, 64//4//2), # head_dim
+            Linear(512//4//2, 512//4//2), # head_dim
             activation_fn,
-            Linear(64//4//2,64//4//2),
+            Linear(512//4//2,512//4//2),
             activation_fn,
-            Linear(64//4//2,64//4//2)
+            Linear(512//4//2,512//4//2)
         )
 
         self.encoder = BiMambaBlock(dim=self.embed_dim,norm_fn=norm_fn,activation_fn=activation_fn,p=p)

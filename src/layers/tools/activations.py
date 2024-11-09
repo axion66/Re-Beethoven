@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional
-
+import math
 
 class SwiGLU(nn.Module): 
     # Raffel et al. adding additional last layer will turn this into FFNSwiGLU.
@@ -16,14 +16,16 @@ class SwiGLU(nn.Module):
 
 
 class xATLU(nn.Module):
-    # Huang [Expanded Gating Ranges Improve Activation Functions]
     def __init__(self):
-        super().__init__()
+        super(xATLU, self).__init__()
         self.alpha = nn.Parameter(torch.zeros(1))
-    
-    def forward(self,x):
-        gate = torch.arctan(x) / 3.1415926535897932384 + 0.5
-        return x * (gate * (1 + 2*self.alpha) - self.alpha)
+        self.half_pi = math.pi / 2
+        self.inv_pi = 1 / math.pi
+
+    def forward(self, x):
+        gate = (torch.arctan(x) + self.half_pi) * self.inv_pi
+        return x * (gate * (1 + 2 * self.alpha) - self.alpha)
+
 
 
 
