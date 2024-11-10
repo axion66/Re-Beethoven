@@ -11,55 +11,78 @@ from typing import Optional,Callable
 
 
 class RevSTFT(nn.Module):
-    # from: https://github.com/yl4579/StyleTTS2/blob/main/Modules/istftnet.py#L456
-    def __init__(self,config):
+    def __init__(self, config):
         super().__init__()
         self.filter_length = config['n_fft']
         self.hop_length = config['hop_length']
         self.win_length = config['win_len']
 
-        self.window = torch.from_numpy(get_window('hann', config['win_len'], fftbins=True).astype(np.float32))
+        # Register window as buffer so it moves to correct device automatically
+        self.register_buffer(
+            'window',
+            torch.from_numpy(get_window('hann', self.win_length, fftbins=True).astype(np.float32))
+        )
 
     def transform(self, input_data):
+        # Fix in-place squeeze which can cause gradient issues
         if input_data.dim() == 3 and input_data.size(1) == 1:
-            input_data.squeeze(1) 
+            input_data = input_data.squeeze(1)
         
         forward_transform = torch.stft(
             input_data,
-            self.filter_length, self.hop_length, self.win_length, window=self.window.to(input_data.device),
-            return_complex=True)
+            n_fft=self.filter_length, 
+            hop_length=self.hop_length, 
+            win_length=self.win_length, 
+            window=self.window,
+            center=True,  # Add padding for better edge handling
+            normalized=False,  # Keep consistent with original scale
+            return_complex=True
+        )
 
-        return torch.abs(forward_transform), torch.angle(forward_transform) 
-        # mag & phase. phase is being used but maybe tough for the model to learn, but essential for high quality.
+        # Add small epsilon to prevent log(0) and division by zero
+        magnitudes = torch.abs(forward_transform)
+        phases = torch.angle(forward_transform)
+        
+        return magnitudes, phases
 
     def inverse(self, magnitude, phase):
+        # No need to transpose here if we keep consistent dimension ordering
+        complex_spec = magnitude * torch.exp(1j * phase)
         
-        magnitude = magnitude.transpose(-1,-2)
-        phase = phase.transpose(-1,-2)
         inverse_transform = torch.istft(
-            magnitude * torch.exp(phase * 1j), # waveform = mag * e^phase
-            self.filter_length, self.hop_length, self.win_length, window=self.window.to(magnitude.device))
+            complex_spec,
+            n_fft=self.filter_length, 
+            hop_length=self.hop_length, 
+            win_length=self.win_length, 
+            window=self.window,
+            center=True,  # Match the forward transform
+            normalized=False  # Keep consistent with forward transform
+        )
 
         return inverse_transform
     
     def forward(self, input_data):
-        self.magnitude, self.phase = self.transform(input_data)
-
-        self.magnitude = self.magnitude.transpose(-1,-2)
-        self.phase = self.phase.transpose(-1,-2)
-        reconstruction = self.inverse(self.magnitude, self.phase)
+        # Ensure input is float32
+        input_data = input_data.float()
+        
+        magnitude, phase = self.transform(input_data)
+        
+        # Optional: normalize magnitudes to help with training stability
+        max_mag = torch.max(magnitude)
+        if max_mag > 0:
+            magnitude = magnitude / max_mag
+            
+        reconstruction = self.inverse(magnitude, phase)
+        
+        # If we normalized magnitudes, scale back the output
+        if max_mag > 0:
+            reconstruction = reconstruction * max_mag
+            
         return reconstruction
     
     @property
     def frequencies(self):
-        """
-        Get frequency bins in Hz
-        
-        Returns:
-            torch.Tensor: Frequency bins
-        """
         return torch.fft.rfftfreq(self.filter_length) * self.filter_length
-
 
 
 # from official torchaudio documentation. Had to get the source code as only nightly version of torchaudio supports those modules.

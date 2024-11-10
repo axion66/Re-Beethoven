@@ -47,14 +47,9 @@ class BiMambaBlock(nn.Module):
         super().__init__()
         self.mambaForward = MambaBlock(dim,d_state,d_conv,expand)
         self.mambaBackward = BackwardMambaBlock(dim,d_state,d_conv,expand)
-        self.norm_fn = norm_fn(dim)
-        self.reduce = nn.Sequential(
-            nn.Linear(dim*2,dim*2),
-            nn.Dropout(p=p),
-            activation_fn,
-            nn.Linear(dim*2,dim)
-        )
+        self.norm_fn = norm_fn(dim*2)
+   
     def forward(self,x):
         b,seq,dim = x.shape
-        x = torch.cat((self.norm_fn(self.mambaBackward(x)) , self.norm_fn(self.mambaBackward(x))),dim=-1)
-        return self.reduce(x)
+        x = self.norm_fn(torch.cat((self.mambaBackward(x) , self.mambaBackward(x)),dim=-1))
+        return x    # Not working well..

@@ -64,7 +64,7 @@ class net(nn.Module):
         super().__init__()
         self.config = config
         self.sequence_length = config['seq_len']                                                # Raw sequence length
-        self.seq_len,self.embed_dim = 250,512 # for 240,000 length(10sec) audio
+        self.seq_len,self.embed_dim = 512,250 # for 240,000 length(10sec) audio
         self.num_blocks = config['num_blocks']                                                  # Number of Transformer blocks
         activation_fn = get_activation_fn(config['activation_fn'],in_chn=self.embed_dim)
         norm_fn = get_norm_fn(config['norm_fn'])
@@ -83,14 +83,18 @@ class net(nn.Module):
 
         #self.encoder = BiMambaBlock(dim=self.embed_dim,norm_fn=norm_fn,activation_fn=activation_fn,p=p)
         #self.decoder = BiMambaBlock(dim=self.embed_dim,norm_fn=norm_fn,activation_fn=activation_fn,p=p)
-        self.encoder = Encoder(channels=[self.embed_dim,128,64,64],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
-        self.decoder = Decoder(channels=[64,64,128,self.embed_dim],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
+        self.encoder = Encoder(channels=[self.embed_dim,128,96,64],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
+        self.decoder = Decoder(channels=[64,96,128,self.embed_dim],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
         self.transformer = nn.ModuleList(
             [TransformerBlock(embed_dim=64, depth=i + 1, num_heads=4,activation_fn=activation_fn,norm_fn=norm_fn) for i in range(self.num_blocks)]
         )
     
   
-        self.last = ResBlock(channels=self.embed_dim,norm_fn=norm_fn,activation_fn=activation_fn,dropout=0)
+        self.last = nn.Sequential(
+            ResBlock(channels=self.embed_dim,norm_fn=norm_fn,activation_fn=activation_fn,dropout=0),
+            ResBlock(channels=self.embed_dim,norm_fn=norm_fn,activation_fn=activation_fn,dropout=0),
+            ResBlock(channels=self.embed_dim,norm_fn=norm_fn,activation_fn=activation_fn,dropout=0)
+        )
 
     def forward(self,x,sigmas): 
         '''
