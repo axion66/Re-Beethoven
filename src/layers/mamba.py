@@ -1,4 +1,7 @@
-from mamba_ssm import Mamba2
+try:
+    from mamba_ssm import Mamba2
+except:
+    print("Mamba not supported.")
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -52,4 +55,4 @@ class BiMambaBlock(nn.Module):
     def forward(self,x):
         b,seq,dim = x.shape
         x = self.norm_fn(torch.cat((self.mambaBackward(x) , self.mambaBackward(x)),dim=-1))
-        return x    # Not working well..
+        return x

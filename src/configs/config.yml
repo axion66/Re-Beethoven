@@ -6,20 +6,20 @@ fft:
   overlap_ratio: 8
   cut_first: 4000
   sr: 8000
-  num_blocks: 60
-  activation_fn: "xATLU"
+  num_blocks: 6
+  activation_fn: "SiLU"
   norm_fn: "RMSNorm"
   dropout: 0.2
-  num_evaluation: 16
+  num_evaluation: 64
 model:
   epoch: 1000
-  device: "cuda:0"
+  device: "mps"
   batch_size: 1
   lr: 0.00008
-  warmup_period: 4000
-  num_workers: 14
+  warmup_period: 500
+  num_workers: 6
   evaluation_cycle: 2
-  sampling_steps: [50, 100, 200, 500, 1000]
+  sampling_steps: [50, 100, 100, 100, 100]
   num_samples: 5
 file:
   audio_folder: "../dataset"

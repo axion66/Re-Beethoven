@@ -50,7 +50,7 @@ def load_mp3_files(base_folder:str,config):
     audio_tensors = []
     for root, _, files in os.walk(base_folder):
         for file in files:
-            if file.endswith(".mp3") or file.endswith(".wav"):
+            if file.endswith(".mp3"): #or file.endswith(".wav"):
                 file_path = os.path.join(root, file)
                 waveform = load_audio(file_path,config)
                 audio_tensors.append(waveform)

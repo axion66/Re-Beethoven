@@ -132,7 +132,7 @@ class DiffMHAFlash(nn.Module):
         sigmas = sigmas.unsqueeze(1)   # batch,1,1,head_dim
         q2 =  q2 + sigmas #somehow in-place not wokring as I used torch.view (on top)
         k2 =  k2 + sigmas
-        v2 =  v2 + sigmas
+        #v2 =  v2 + sigmas
         # Differential Attention
         if FLASH_ON:
             # Convert inputs to float16

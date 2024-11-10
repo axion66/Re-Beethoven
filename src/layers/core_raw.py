@@ -9,7 +9,7 @@ from layers.attn import TransformerBlock
 from layers.cnn import Encoder,Decoder,ResBlock
 from layers.tools.activations import get_activation_fn
 from layers.tools.norms import get_norm_fn
-from layers.mamba import BiMambaBlock
+#from layers.mamba import BiMambaBlock
 
 class FourierFeatures(nn.Module):
     # from NCSN++.
@@ -25,39 +25,6 @@ class FourierFeatures(nn.Module):
 
 
 
-class VQTokenizer(nn.Module):
-    def __init__(self,config):
-        self.device = torch.device(config['device'])
-        self.config_path = "WavTokenizer/configs/medium_matadata.yml"
-        self.model_path = "../pretrained_models/wavtokenizer_medium_music_audio_320_24k_v2.ckpt"
-        #audio_outpath = "xxx"
-
-        self.wavtokenizer = WavTokenizer.from_pretrained0802(self.config_path, self.model_path).to(self.device)
-        self.freeze_model(self.wavtokenizer)
-
-        self.bandwidth_id = torch.tensor([0])
-
-    def freeze_model(self,model):
-        for param in model.parameters():
-            param.requires_grad = False
-
-
-    def encode(self,wav):
-        """
-            wav:Tensor should have sr == 24000
-        """
-        #wav, sr = torchaudio.load("../../../dataset/no8/0/audio0.mp3")
-        #wav = convert_audio(wav, sr, 24000, 1) 
-        
-        wav=wav.to(self.device)
-        features,discrete_code= self.wavtokenizer.encode_infer(wav, bandwidth_id=self.bandwidth_id)
-        
-        return features,discrete_code
-    def decode(self,features):
-        audio_out = self.wavtokenizer.decode(features, bandwidth_id=self.bandwidth_id) 
-        #torchaudio.save(audio_outpath, audio_out, sample_rate=24000, encoding='PCM_S', bits_per_sample=16)
-        return audio_out
-    
 class net(nn.Module):
    
     def __init__(self,config):
