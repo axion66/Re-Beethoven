@@ -13,7 +13,7 @@ import soundfile as sf  # For saving audio files
 from tqdm import tqdm
 import argparse
 #from layers.core_cnn_STFT import net
-from layers.core_raw import net
+from layers.cores.core_raw import net
 #from layers.core_WavTokenizer import net
 #from layers.core_UNet import UNetWithMHA
 import pytorch_warmup as warmup
@@ -31,7 +31,7 @@ class Trainer:
 
         '''MODEL'''
         self.net = net(self.FFT_CFG)
-        self.model = Denoiser(model=self.net, sigma_data=0.5,device=torch.device(self.MODEL_CFG['device'])).to(self.MODEL_CFG['device'])
+        self.model = Denoiser(config=self.FFT_CFG,model=self.net, sigma_data=0.5,device=torch.device(self.MODEL_CFG['device'])).to(self.MODEL_CFG['device'])
         
 
         '''Loader'''

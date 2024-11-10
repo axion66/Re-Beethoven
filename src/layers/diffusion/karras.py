@@ -3,6 +3,7 @@ from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import reduce
+import torchaudio.transforms as T
 
 # Karras et al. https://arxiv.org/pdf/2206.00364 implementation
 
@@ -12,6 +13,7 @@ class Denoiser(nn.Module):
 
     def __init__(
         self,
+        config,
         model: nn.Module,
         sigma_data: float=0.5,  # data distribution standard deviation
         sigma_min=0.002,
@@ -24,6 +26,7 @@ class Denoiser(nn.Module):
         device: torch.device = torch.device("cuda:0")
     ):
         super().__init__()
+        self.config = config
         self.device = device
         self.model = model
         self.sigma_data = sigma_data
@@ -38,8 +41,22 @@ class Denoiser(nn.Module):
         self.s_churn = s_churn
         self.s_noise = s_noise
 
+        self.mel_transform = T.MelSpectrogram(
+            sample_rate=self.config['sr'],
+            n_fft=self.config['n_fft'],
+            hop_length=self.config['hop_length'],
+            win_length=self.config['win_len'],
+            n_mels=128,
+            center=True,
+            pad_mode='reflect',
+            power=2.0,
+            f_min=0.0,
+            f_max=8000
+        )
+    def calculate_mel(self,x):
+        mel_spec = torch.log(self.mel_transform(x)).transpose(-1,-2)
+        return mel_spec.shape
     
-
     def get_scalings(self,sigmas):
         c_skip = (self.sigma_data ** 2) / (sigmas**2 + self.sigma_data**2)
         c_out = sigmas * self.sigma_data / ((sigmas**2 + self.sigma_data**2) ** 0.5) 
@@ -60,9 +77,10 @@ class Denoiser(nn.Module):
         # std transformation & RevIN
         # x: batch, audio_length
         b, device = x.shape[0], x.device
-
+        
+        
         #std 
-        x_mean,x_std = x.mean(dim=-1,keepdim=True),x.std(dim=-1,keepdim=True)
+        x_mean,x_std = x.mean(dim=-1,keepdim=True),x.std(dim=-1,keepdim=True) # length dimention std 
         x = (x - x_mean) * self.sigma_data / x_std
 
         
@@ -70,7 +88,8 @@ class Denoiser(nn.Module):
         if sigmas is None:
             sigmas = self.sigma_noise(num_samples=b)
         x_noised = x + (torch.randn_like(x) * sigmas) # randn_like * sigmas == noise
-
+        x_noised = torch.log(self.mel_transform(x_noised)).transpose(-1,-2)
+        x = torch.log(self.mel_transform(x)).transpose(-1,-2)
         c_skip, c_out, c_in, c_noise = [self.append_dims(x, x.ndim) for x in self.get_scalings(sigmas)]
         x_denoised = self.model(c_in * x_noised, c_noise) * c_out + x * c_skip
         
@@ -82,6 +101,7 @@ class Denoiser(nn.Module):
  
         b, device = x.shape[0], x.device
 
+    
         # std transform
         x_mean,x_std = x.mean(dim=-1,keepdim=True),x.std(dim=-1,keepdim=True)
         x = (x - x_mean) * self.sigma_data / x_std
@@ -89,9 +109,9 @@ class Denoiser(nn.Module):
         # noise
         #mask = torch.rand_like(x) < 0.95  #70 will be noise, while other 30 will be unnoised.
         sigmas = self.sigma_noise(num_samples=b)
-        noise = torch.randn_like(x) * sigmas
         x_noised = x + (torch.randn_like(x) * sigmas) # randn_like * sigmas == noise
-
+        x_noised = torch.log(self.mel_transform(x_noised)).transpose(-1,-2)
+        x = torch.log(self.mel_transform(x)).transpose(-1,-2)
 
         c_skip, c_out, c_in, c_noise = [self.append_dims(x, x.ndim) for x in self.get_scalings(sigmas)]
         x_denoised = self.model(c_in * x_noised, c_noise)#   * c_out + x * c_skip -> replaced by changing original x.
