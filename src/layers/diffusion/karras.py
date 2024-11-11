@@ -12,6 +12,7 @@ class Denoiser(nn.Module):
 
     def __init__(
         self,
+        config,
         model: nn.Module,
         sigma_data: float=0.5,  # data distribution standard deviation
         sigma_min=0.002,
@@ -24,6 +25,7 @@ class Denoiser(nn.Module):
         device: torch.device = torch.device("cuda:0")
     ):
         super().__init__()
+        self.config = config
         self.device = device
         self.model = model
         self.sigma_data = sigma_data
@@ -118,7 +120,7 @@ class Denoiser(nn.Module):
 
         sigmas = self._schudule_sigmas(num_steps).unsqueeze(-1) # t = {batch,1}
 
-        x = sigmas[0] ** 2 * torch.randn((num_samples,self.model.sequence_length),device=self.device) 
+        x = sigmas[0] ** 2 * torch.randn((num_samples,self.config['seq_len']),device=self.device) 
         gammas = torch.where(
             (self.s_tmin <= sigmas) & (sigmas <= self.s_tmax),
             torch.tensor(min(self.s_churn/num_steps, 0.414213)), # 0.4142 ~ sqrt(2) - 1
@@ -160,12 +162,12 @@ class Denoiser(nn.Module):
         epsilon = (self.s_noise**2) * torch.randn_like(x)
         sigma_hat = sigma * (1 + gamma)
         x_hat = x + (sigma_hat ** 2 - sigma ** 2)**0.5 * epsilon
-        d = (x_hat - self.forward(x_hat, sigma_hat)[0]) / sigma_hat
+        d = (x_hat - self.forward(x_hat, sigma_hat.unsqueeze(-1))[0]) / sigma_hat
         x_next = x_hat + (sigma_next - sigma_hat) * d
         if sigma_next.values != 0:
             # Create a sigma_next tensor of the same shape as x
 
-            model_out_next = self.forward(x_next, sigma_next)[0]
+            model_out_next = self.forward(x_next, sigma_next.unsqueeze(-1))[0]
             d_prime = (x_next - model_out_next) / sigma_next
             x_next = x_hat + (sigma_next - sigma_hat) * 0.5 * (d + d_prime)
         

@@ -2,8 +2,8 @@ fft:
   n_fft: 512
   win_len: 512
   hop_length: 256
-  seq_len: 262144
-  overlap_ratio: 32
+  seq_len: 32768
+  overlap_ratio: 2
   cut_first: 4000
   sr: 8000
   num_blocks: 6
@@ -12,13 +12,13 @@ fft:
   dropout: 0.2
   num_evaluation: 64
 model:
-  epoch: 10000
-  device: "cuda:0"
-  batch_size: 64
-  lr: 0.00008
+  epoch: 1000000
+  device: "cpu"
+  batch_size: 1
+  lr: 0.003
   warmup_period: 4000
-  num_workers: 60
-  evaluation_cycle: 6
+  num_workers: 6
+  evaluation_cycle: 20
   sampling_steps: [50, 100, 100]
   num_samples: 3
 file:

@@ -122,6 +122,7 @@ class DiffMHAFlash(TimestepBlockA):
     ):  
         b, seq_len, embed_dim = x.size()
         assert embed_dim == self.embed_dim
+        # QKV Split
 
         sigmas = self.sigma_rotate(sigmas)
         q,k,v = torch.chunk(self.qkv(x),dim=-1,chunks=3)

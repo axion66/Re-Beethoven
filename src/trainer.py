@@ -31,13 +31,13 @@ class Trainer:
         '''MODEL'''
         #self.net = net(self.FFT_CFG)
         self.net = net(
-            in_channels=512,               # e.g., for RGB images
-            model_channels=64,           # Base number of channels
-            out_channels=512,              # Typically same as input for autoencoders
+            in_channels=1,               # e.g., for RGB images
+            model_channels=256,           # Base number of channels
+            out_channels=1,              # Typically same as input for autoencoders
             num_res_blocks=2,            # Number of ResBlocks per level
-            attention_resolutions=[1,2,4,8, 16],# Apply attention at 1/4 and 1/8 resolutions
+            attention_resolutions=[2],# Apply attention at 1/4 and 1/8 resolutions
             dropout=0.1,                 # Dropout rate
-            channel_mult=(1, 2, 4, 8, 16),   # Channel multiplier for each level
+            channel_mult=(1, 2, 4, 8),   # Channel multiplier for each level
             conv_resample=True,          # Use convolutional down/upsampling
             dims=1,                      # 2D data (e.g., images)
             use_fp16=False,              # Use float16 for memory efficiency
@@ -45,7 +45,8 @@ class Trainer:
             use_scale_shift_norm=True,   # Use scale-shift normalization
             resblock_updown=True         # Use ResBlock for up/downsampling
         )
-        self.model = Denoiser(model=self.net, sigma_data=0.5,device=torch.device(self.MODEL_CFG['device'])).to(self.MODEL_CFG['device'])
+        print("Model prepared.")
+        self.model = Denoiser(self.FFT_CFG,model=self.net, sigma_data=0.5,device=torch.device(self.MODEL_CFG['device'])).to(self.MODEL_CFG['device'])
         
 
         '''Loader'''
