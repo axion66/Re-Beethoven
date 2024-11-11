@@ -2,7 +2,7 @@ import os
 import yaml
 import torch
 import torch.nn as nn
-from layers.diffusion.karras import Denoiser
+from layers.gan.gan_simple import GANWrapper
 from torch.optim import Adam
 from layers.preprocess import load_mp3_files, create_overlapping_chunks_tensor
 from torch.utils.data import TensorDataset, DataLoader
@@ -30,7 +30,7 @@ class Trainer:
 
         '''MODEL'''
         #self.net = net(self.FFT_CFG)
-        self.net = net(
+        self.gen = net(
             in_channels=1,               # e.g., for RGB images
             model_channels=64,           # Base number of channels
             out_channels=1,              # Typically same as input for autoencoders
@@ -40,18 +40,36 @@ class Trainer:
             channel_mult=(1, 2, 4, 8),   # Channel multiplier for each level
             conv_resample=True,          # Use convolutional down/upsampling
             dims=1,                      # 2D data (e.g., images)
-            use_fp16=False,              # Use float16 for memory efficiency
+            use_fp16=True,              # Use float16 for memory efficiency
             num_heads=4,                 # Attention heads for TransformerBlock
             use_scale_shift_norm=True,   # Use scale-shift normalization
             resblock_updown=True         # Use ResBlock for up/downsampling
         )
+        self.dis = net(
+            in_channels=1,               # e.g., for RGB images
+            model_channels=64,           # Base number of channels
+            out_channels=1,              # Typically same as input for autoencoders
+            num_res_blocks=2,            # Number of ResBlocks per level
+            attention_resolutions=[2],# Apply attention at 1/4 and 1/8 resolutions
+            dropout=0.1,                 # Dropout rate
+            channel_mult=(1, 2, 4),   # Channel multiplier for each level
+            conv_resample=True,          # Use convolutional down/upsampling
+            dims=1,                      # 2D data (e.g., images)
+            use_fp16=True,              # Use float16 for memory efficiency
+            num_heads=4,                 # Attention heads for TransformerBlock
+            use_scale_shift_norm=False,   # Use scale-shift normalization
+            resblock_updown=True,         # Use ResBlock for up/downsampling
+            gan_mode=True
+        )
+
         print("Model prepared.")
-        self.model = Denoiser(self.FFT_CFG,model=self.net, sigma_data=0.5,device=torch.device(self.MODEL_CFG['device'])).to(self.MODEL_CFG['device'])
+        self.model = GANWrapper(self.FFT_CFG,generator=self.gen,discriminator=self.dis)
         
 
         '''Loader'''
         self.train_loader, self.test_loader = self.getLoader()
-        self.optim, self.lr_schedule,self.warmup_schedule = self.getOptimizer(model=self.net, trainLoader=self.train_loader, config=self.MODEL_CFG)
+        self.optim_gen, _,_ = self.getOptimizer(model=self.gen, trainLoader=self.train_loader, config=self.MODEL_CFG)
+        self.optim_dis, _,_ = self.getOptimizer(model=self.dis, trainLoader=self.train_loader, config=self.MODEL_CFG)
         
         '''LOG'''
         self.train_losses = []
@@ -61,7 +79,7 @@ class Trainer:
         
 
         wandb.init(
-            project="Audio Diffusion",
+            project="Audio Diffusion(GAN)",
             config={
                 "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "No GPU available.",
                 **self.cfg
@@ -96,19 +114,12 @@ class Trainer:
             EPOCH_LOSS = []
 
             for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{EPOCH}")):
-                self.optim.zero_grad()
-                x = x[0].to(self.MODEL_CFG['device'])
-                loss = self.model.loss_fn(x)
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=1.0)
-                self.optim.step()
-                with self.warmup_schedule.dampening():
-                    if self.warmup_schedule.last_step + 1 >= self.MODEL_CFG['warmup_period']:
-                        self.lr_schedule.step()
-                
-                # Timestamp Loss, LR
+                gan,dis,dis_real,dis_fake = self.model.loss_fn(x[0].to(self.MODEL_CFG['device']),self.optim_gen,self.optim_dis)
                 EPOCH_LOSS.append(loss.item())
-                wandb.log({"timestamp_loss": loss.item(), "lr": self.optim.param_groups[0]['lr']})
+                wandb.log({"gan loss": gan,
+                           "dis loss": dis,
+                           "dis real loss": dis_real,
+                           "dis fake loss": dis_fake})
 
             # Epoch Loss
             avg_train_loss = sum(EPOCH_LOSS) / len(EPOCH_LOSS)
@@ -123,7 +134,7 @@ class Trainer:
                 with torch.no_grad():
                     for x in self.test_loader:
                         x = x[0].to(self.MODEL_CFG['device']) # list to TEnsor
-                        loss = self.model.loss_fn(x)
+                        _,loss,_,_ = self.model.loss_fn(x,self.optim_gen,self.optim_dis)
                         EVAL_LOSS.append(loss.item())
             
                 avg_eval_loss = sum(EVAL_LOSS) / len(EVAL_LOSS)
@@ -179,7 +190,7 @@ class Trainer:
         os.makedirs(output_dir, exist_ok=True)
 
         with torch.no_grad():
-            generated_samples = self.model.sample(num_samples,num_steps)
+            generated_samples = self.model.sample(num_samples)
 
         for i in range(num_samples):
             sample = generated_samples[i].cpu().numpy().flatten()

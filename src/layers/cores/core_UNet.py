@@ -350,6 +350,7 @@ class net(nn.Module):
         num_heads_upsample=-1,
         use_scale_shift_norm=False,
         resblock_updown=False,
+        gan_mode=False,
     ):
         super().__init__()
 
@@ -505,7 +506,7 @@ class net(nn.Module):
             nn.SiLU(),
             conv_nd(dims, input_ch, out_channels, 3, padding=1),
         )
-    
+        self.gan_mode = gan_mode
     def convert_to_fp16(self):
         """
         Convert the torso of the model to float16.
@@ -570,6 +571,8 @@ class net(nn.Module):
             h = torch.cat([h, hs.pop()], dim=1)
             h = module(h, emb)
         h = h.type(x.dtype)
+        if self.gan_mode:
+            return self.out(h).reshape(b,-1).mean(-1)
         return self.out(h).reshape(b,-1)
 
 
@@ -719,13 +722,4 @@ class Decoder(nn.Module):
             x = block(x)
 
         return x
-
-
-
-
-
-
-
-
-
 """
