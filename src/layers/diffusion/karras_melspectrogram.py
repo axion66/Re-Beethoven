@@ -3,6 +3,7 @@ from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import reduce
+import torchaudio.transforms as T
 
 # Karras et al. https://arxiv.org/pdf/2206.00364 implementation
 
@@ -12,6 +13,7 @@ class Denoiser(nn.Module):
 
     def __init__(
         self,
+        config,
         model: nn.Module,
         sigma_data: float=0.5,  # data distribution standard deviation
         sigma_min=0.002,
@@ -24,6 +26,7 @@ class Denoiser(nn.Module):
         device: torch.device = torch.device("cuda:0")
     ):
         super().__init__()
+        self.config = config
         self.device = device
         self.model = model
         self.sigma_data = sigma_data
@@ -38,8 +41,33 @@ class Denoiser(nn.Module):
         self.s_churn = s_churn
         self.s_noise = s_noise
 
+        self.mel_transform = T.MelSpectrogram(
+            sample_rate=self.config['sr'],
+            n_fft=self.config['n_fft'],
+            hop_length=self.config['hop_length'],
+            win_length=self.config['win_len'],
+            n_mels=80,
+            center=True,
+            pad_mode='reflect',
+            power=2.0,
+            f_min=0.0,
+            f_max=8000
+        )
+        self.inverse_mel = T.InverseMelScale(
+            n_stft=self.config['n_fft']//2 + 1,
+            n_mels=80,
+            sample_rate=self.config['sr'],
+        )
+        # Griffin-Lim
+        self.griffin_lim = T.GriffinLim(
+            n_fft=self.config['n_fft'],
+            hop_length=self.config['hop_length'],
+            n_iter=32
+        )
+    def calculate_mel(self,x):
+        mel_spec = torch.log(self.mel_transform(x)).transpose(-1,-2)
+        return mel_spec.shape
     
-
     def get_scalings(self,sigmas):
         c_skip = (self.sigma_data ** 2) / (sigmas**2 + self.sigma_data**2)
         c_out = sigmas * self.sigma_data / ((sigmas**2 + self.sigma_data**2) ** 0.5) 
@@ -55,14 +83,14 @@ class Denoiser(nn.Module):
             raise ValueError(f'input has {x.ndim} dims but target_dims is {target_dims}, which is less')
         return x[(...,) + (None,) * dims_to_append]
 
-
-    def forward(self, x: Tensor,sigmas=None) -> Tensor:
+    
+    '''def forward(self, x: Tensor,sigmas=None) -> Tensor:
         # std transformation & RevIN
         # x: batch, audio_length
         b, device = x.shape[0], x.device
-
+        
         #std 
-        x_mean,x_std = x.mean(dim=-1,keepdim=True),x.std(dim=-1,keepdim=True)
+        x_mean,x_std = x.mean(dim=(-2,-1),keepdim=True),x.std(dim=(-2,-1),keepdim=True) # length dimention std 
         x = (x - x_mean) * self.sigma_data / x_std
 
         
@@ -70,27 +98,49 @@ class Denoiser(nn.Module):
         if sigmas is None:
             sigmas = self.sigma_noise(num_samples=b)
         x_noised = x + (torch.randn_like(x) * sigmas) # randn_like * sigmas == noise
-
+        #x_noised = torch.log(self.mel_transform(x_noised)+1e-6).transpose(-1,-2)
+        #x = torch.log(self.mel_transform(x)+1e-6).transpose(-1,-2)
         c_skip, c_out, c_in, c_noise = [self.append_dims(x, x.ndim) for x in self.get_scalings(sigmas)]
         x_denoised = self.model(c_in * x_noised, c_noise) * c_out + x * c_skip
         
         #std
         x_denoised = x_denoised * x_std / self.sigma_data + x_mean
+        return x_denoised, sigmas'''
+    def forward(self, x: Tensor, sigmas=None) -> Tensor:
+        """
+        Forward pass of the model. Applies noise, transforms, and denoising.
+        """
+        # Standardization (mean/std)
+        b, device = x.shape[0], x.device
+        x_mean, x_std = x.mean(dim=(-2,-1), keepdim=True), x.std(dim=(-2,-1), keepdim=True)
+        x = (x - x_mean) * self.sigma_data / x_std
+    
+        # Noise addition
+        if sigmas is None:
+            sigmas = self.sigma_noise(num_samples=b)  # Sample noise
+        x_noised = x + (torch.randn_like(x) * sigmas)  # Add Gaussian noise
+    
+        c_skip, c_out, c_in, c_noise = [self.append_dims(x, x.ndim) for x in self.get_scalings(sigmas)]        
+        x_denoised = self.model(c_in * x_noised, c_noise) * c_out + x * c_skip        
+        x_denoised = x_denoised * x_std / self.sigma_data + x_mean
+    
         return x_denoised, sigmas
+
 
     def loss_fn(self,x:Tensor):
  
         b, device = x.shape[0], x.device
-
+        x = torch.log(self.mel_transform(x)+1e-6).transpose(-1,-2)
         # std transform
-        x_mean,x_std = x.mean(dim=-1,keepdim=True),x.std(dim=-1,keepdim=True)
+        x_mean,x_std = x.mean(dim=(-2,-1),keepdim=True),x.std(dim=(-2,-1),keepdim=True)
         x = (x - x_mean) * self.sigma_data / x_std
-            
-        # noise
-        #mask = torch.rand_like(x) < 0.95  #70 will be noise, while other 30 will be unnoised.
         sigmas = self.sigma_noise(num_samples=b)
-        noise = torch.randn_like(x) * sigmas
         x_noised = x + (torch.randn_like(x) * sigmas) # randn_like * sigmas == noise
+        #x_noised = torch.log(self.mel_transform(x_noised)+1e-6).transpose(-1,-2)
+        
+        
+        
+        
 
 
         c_skip, c_out, c_in, c_noise = [self.append_dims(x, x.ndim) for x in self.get_scalings(sigmas)]
@@ -98,14 +148,15 @@ class Denoiser(nn.Module):
         x = (x - c_skip * x_noised) / c_out # instead of transforming the x_denoised, we transform the original x.
 
         loss = self._weighting_snr(sigmas) * ((x_denoised - x)**2)
+        #print(f"loss: {loss.reshape(-1).mean()}")
         #print(f"weight: {self._weighting_snr(sigmas)} \n loss: {loss}, \n w/o weight: {loss / self._weighting_snr(sigmas)}")
         return loss.reshape(-1).mean()
 
 
     def _weighting_snr(self, sigmas):
         #return (sigmas ** 2 + self.sigma_data ** 2) / (sigmas * self.sigma_data) ** 2 -> crazy-level magnitude.(0.5 to 1000)
-        return self.sigma_data ** 2 / (sigmas ** 2 + self.sigma_data ** 2) #(snr)
-        #return 1
+        #return self.sigma_data ** 2 / (sigmas ** 2 + self.sigma_data ** 2) #(snr)
+        return 1
 
     # sampling part
     @torch.no_grad()
@@ -118,7 +169,10 @@ class Denoiser(nn.Module):
 
         sigmas = self._schudule_sigmas(num_steps).unsqueeze(-1) # t = {batch,1}
 
-        x = sigmas[0] ** 2 * torch.randn((num_samples,self.model.sequence_length),device=self.device) 
+        x = torch.randn((num_samples,self.model.sequence_length),device=self.device)
+        x = torch.log(self.mel_transform(x)+1e-6).transpose(-1,-2)
+        x = (x - x.mean(dim=(-2,-1),keepdim=True)) * self.sigma_data / x.std(dim=(-2,-1),keepdim=True)
+        x = sigmas[0] ** 2 * x
         gammas = torch.where(
             (self.s_tmin <= sigmas) & (sigmas <= self.s_tmax),
             torch.tensor(min(self.s_churn/num_steps, 0.414213)), # 0.4142 ~ sqrt(2) - 1
@@ -133,8 +187,27 @@ class Denoiser(nn.Module):
                 gamma=gammas[i]
             )
         
-        return x
-    
+        return self.inverse_mel_transform(x.transpose(-1,-2))
+
+
+    @torch.no_grad()
+    def inverse_mel_transform(self,mel_spec):
+        """
+        Convert mel spectrogram to audio using Griffin-Lim
+        
+        Args:
+            mel_spec (torch.Tensor): Mel spectrogram [batch, n_mels, time]
+            n_fft (int): FFT size
+            hop_length (int): Hop length for STFT
+            n_iter (int): Number of Griffin-Lim iterations
+        """
+      
+        mel_spec = mel_spec.exp()
+        linear_spec = self.inverse_mel(mel_spec)
+        waveform = self.griffin_lim(linear_spec)
+        
+        return waveform
+        
     @torch.no_grad()
     def _schudule_sigmas(self, num_steps: int):
         steps = torch.arange(num_steps, device=self.device, dtype=torch.float32) 
@@ -157,15 +230,17 @@ class Denoiser(nn.Module):
         sigma_next: Tensor,
         gamma: Tensor
     ) -> Tensor:
-        epsilon = (self.s_noise**2) * torch.randn_like(x)
+        epsilon = (self.s_noise**2) * torch.log(self.mel_transform(torch.randn((x.size(0), self.config['seq_len']) ,device=self.device))+1e-6).transpose(-1,-2) #torch.randn_like(x)
         sigma_hat = sigma * (1 + gamma)
+        
         x_hat = x + (sigma_hat ** 2 - sigma ** 2)**0.5 * epsilon
-        d = (x_hat - self.forward(x_hat, sigma_hat)[0]) / sigma_hat
+     
+        d = (x_hat - self.forward(x_hat, sigma_hat.unsqueeze(-1))[0]) / sigma_hat
         x_next = x_hat + (sigma_next - sigma_hat) * d
         if sigma_next.values != 0:
             # Create a sigma_next tensor of the same shape as x
 
-            model_out_next = self.forward(x_next, sigma_next)[0]
+            model_out_next = self.forward(x_next, sigma_next.unsqueeze(-1))[0]
             d_prime = (x_next - model_out_next) / sigma_next
             x_next = x_hat + (sigma_next - sigma_hat) * 0.5 * (d + d_prime)
         

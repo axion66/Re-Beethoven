@@ -7,7 +7,7 @@ import torchaudio.transforms as T
 from layers.tools.audios import RevSTFT
 from layers.tools.utils import *
 from layers.attn import TransformerBlock
-from layers.cnn import Encoder,Decoder,ResBlock
+from layers.cores.core_Unet import Encoder,Decoder,ResBlock
 from layers.tools.activations import get_activation_fn
 from layers.tools.norms import get_norm_fn
 
@@ -37,7 +37,7 @@ class net(nn.Module):
             n_fft=self.config['n_fft'],
             hop_length=self.config['hop_length'],
             win_length=self.config['win_len'],
-            n_mels=128,
+            n_mels=80,
             center=True,
             pad_mode='reflect',
             power=2.0,
@@ -68,8 +68,8 @@ class net(nn.Module):
 
         #self.encoder = BiMambaBlock(dim=self.embed_dim,norm_fn=norm_fn,activation_fn=activation_fn,p=p)
         #self.decoder = BiMambaBlock(dim=self.embed_dim,norm_fn=norm_fn,activation_fn=activation_fn,p=p)
-        self.encoder = Encoder(channels=[self.embed_dim,128,64],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
-        self.decoder = Decoder(channels=[64,128,self.embed_dim],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
+        self.encoder = Encoder(channels=[self.embed_dim,64,64],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
+        self.decoder = Decoder(channels=[64,64,self.embed_dim],activation_fn=activation_fn,norm_fn=norm_fn,p=p)
         self.transformer = nn.ModuleList(
             [TransformerBlock(embed_dim=64, depth=i + 1, num_heads=4,activation_fn=activation_fn,norm_fn=norm_fn) for i in range(self.num_blocks)]
         )
@@ -82,13 +82,15 @@ class net(nn.Module):
 
     def calculate_mel(self,x):
         mel_spec = torch.log(self.mel_transform(x)).transpose(-1,-2)
-        return mel_spec.shape
+        return mel_spec.shape[1],mel_spec.shape[2]
     
     def forward(self,x,sigmas): 
         '''
             x: [batch,seq],
             sigmas: [batch]
         '''
+        #print(x.shape)
+        #print(sigmas.shape)
         # Condition Mapping (Timestamp)
         sigmas = self.time_emb(sigmas.unsqueeze(-1))
         sigmas = self.map_layers(sigmas)

@@ -33,7 +33,8 @@ class Transpose(nn.Module):
 
 def transpose_norm_fn(norm):
     return nn.Sequential(
-        Transpose(-1,-2),
+        Transpose(1,-1),
         norm,
-        Transpose(-1,-2)
+        Transpose(1,-1)
     )
+

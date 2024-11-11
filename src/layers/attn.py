@@ -13,21 +13,28 @@ try:
 except:
     print("Flash attention not supported. try revising the code")
     FLASH_ON = False
+from abc import abstractmethod
+class TimestepBlockA(nn.Module):
+    """
+    Any module where forward() takes timestep embeddings as a second argument.
+    """
+
+    @abstractmethod
+    def forward(self, x, emb):
+        """
+        Apply the module to `x` given `emb` timestep embeddings.
+        """
 
 
 
-
-
-
-
-
-class TransformerBlock(nn.Module):
+class TransformerBlock(TimestepBlockA):
 
     def __init__(
         self,
         embed_dim,
         depth,
         num_heads,
+        sigma_dim=256,
         norm_fn=None,
         activation_fn=None,
         p=0.1
@@ -44,26 +51,27 @@ class TransformerBlock(nn.Module):
 
         self.attn = DiffMHAFlash(embed_dim=embed_dim, 
                                        depth=depth,
-                                       num_heads=num_heads)
+                                       num_heads=num_heads,
+                                       sigma_dim=sigma_dim)
         self.ff = PositionwiseFeedForward(dims=embed_dim,
                                           activation=activation_fn if exists(activation_fn) else nn.SiLU(),
                                           rate=4,
                                           dropout=p
                                           )
 
-    def forward(self, x,sigmas):
+    def forward(self, x,emb):
         '''
         Get x: [batch,seq,embed_dim]
         Get sigmas: [batch,head_dim]
         '''
 
-        x = self.ln1(self.attn(x,sigmas) + x)
+        x = self.ln1(self.attn(x,emb) + x)
         x = self.ln2(self.ff(x) + x)
 
         return x
 
 
-class DiffMHAFlash(nn.Module):
+class DiffMHAFlash(TimestepBlockA):
     # https://github.com/microsoft/unilm/blob/master/Diff-Transformer/multihead_flashdiff_1.py
     # Differential Attention for precise attention score
 
@@ -73,6 +81,7 @@ class DiffMHAFlash(nn.Module):
         embed_dim, # freq_bins for orig
         depth, # layer num. [1 to N layer]
         num_heads, # best for 2?, as one can focus on low_freq and one can focus on high freq (like RoPE)
+        sigma_dim
     ):
         super().__init__()
         self.embed_dim = embed_dim
@@ -91,7 +100,8 @@ class DiffMHAFlash(nn.Module):
                                       interpolate_factor=1,
                                       cache_if_possible=False, 
                                       use_xpos=False)
-    
+
+        self.sigma_rotate = Linear(sigma_dim,self.head_dim,bias=False)
     def reset_lambda(self,depth):
         self.lambda_init = 0.8 - 0.6 * math.exp(-0.3 * depth)
         self.lambda_q1 = nn.Parameter(torch.zeros(self.head_dim, dtype=torch.float32).normal_(mean=0,std=0.1))
@@ -112,8 +122,10 @@ class DiffMHAFlash(nn.Module):
     ):  
         b, seq_len, embed_dim = x.size()
         assert embed_dim == self.embed_dim
-
         # QKV Split
+        print(x.shape)
+        print(sigmas.shape)
+        sigmas = self.sigma_rotate(sigmas)
         q,k,v = torch.chunk(self.qkv(x),dim=-1,chunks=3)
         q = q.view(b, seq_len, 2 * self.num_heads, self.head_dim)   # batch, seq_len, 2 * n, h
         k = k.view(b, seq_len, 2 * self.num_heads, self.head_dim)   # batch, seq_len, 2 * n, h
@@ -129,7 +141,9 @@ class DiffMHAFlash(nn.Module):
         q1, q2 = q[:, :, :, 0], q[:, :, :, 1] 
         k1, k2 = k[:, :, :, 0], k[:, :, :, 1]
         v1, v2 = v[:, :, :, 0], v[:, :, :, 1]
-        sigmas = sigmas.unsqueeze(1)   # batch,1,1,head_dim
+        sigmas = sigmas.unsqueeze(1).unsqueeze(1)   # batch,1,1,head_dim
+        print(q2.shape)
+        print(sigmas.shape)
         q2 =  q2 + sigmas #somehow in-place not wokring as I used torch.view (on top)
         k2 =  k2 + sigmas
         #v2 =  v2 + sigmas
