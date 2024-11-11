@@ -122,9 +122,7 @@ class DiffMHAFlash(TimestepBlockA):
     ):  
         b, seq_len, embed_dim = x.size()
         assert embed_dim == self.embed_dim
-        # QKV Split
-        print(x.shape)
-        print(sigmas.shape)
+
         sigmas = self.sigma_rotate(sigmas)
         q,k,v = torch.chunk(self.qkv(x),dim=-1,chunks=3)
         q = q.view(b, seq_len, 2 * self.num_heads, self.head_dim)   # batch, seq_len, 2 * n, h
@@ -142,8 +140,7 @@ class DiffMHAFlash(TimestepBlockA):
         k1, k2 = k[:, :, :, 0], k[:, :, :, 1]
         v1, v2 = v[:, :, :, 0], v[:, :, :, 1]
         sigmas = sigmas.unsqueeze(1).unsqueeze(1)   # batch,1,1,head_dim
-        print(q2.shape)
-        print(sigmas.shape)
+
         q2 =  q2 + sigmas #somehow in-place not wokring as I used torch.view (on top)
         k2 =  k2 + sigmas
         #v2 =  v2 + sigmas

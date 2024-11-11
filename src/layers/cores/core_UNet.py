@@ -562,7 +562,6 @@ class net(nn.Module):
         h = x.type(self.dtype)
         i=0
         for module in self.input_blocks:
-            print(i)
             h = module(h, emb)
             hs.append(h)
             i+=1
