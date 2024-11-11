@@ -32,7 +32,7 @@ class Trainer:
         #self.net = net(self.FFT_CFG)
         self.net = net(
             in_channels=1,               # e.g., for RGB images
-            model_channels=256,           # Base number of channels
+            model_channels=64,           # Base number of channels
             out_channels=1,              # Typically same as input for autoencoders
             num_res_blocks=2,            # Number of ResBlocks per level
             attention_resolutions=[2],# Apply attention at 1/4 and 1/8 resolutions
