@@ -36,7 +36,7 @@ class BackwardMambaBlock(MambaBlock):
     
 
 class BiMambaBlock(nn.Module):
-    # Same logic as BiLSTM
+    # Same logic as BiLSTM. SOTA at time forecasting, but somehow not good at Diffusion? 
     def __init__(
             self,
             dim,

@@ -5,22 +5,11 @@ import torchaudio
 
 from layers.tools.audios import RevSTFT
 from layers.tools.utils import *
-from layers.attn import TransformerBlock
-from layers.cores.core_UNet import Encoder,Decoder,ResBlock
+from layers.blocks.attention import TransformerBlock
+from layers.cores.unet import Encoder,Decoder,ResBlock
 from layers.tools.activations import get_activation_fn
 from layers.tools.norms import get_norm_fn
-#from layers.mamba import BiMambaBlock
 
-class FourierFeatures(nn.Module):
-    # from NCSN++.
-    def __init__(self, in_features, out_features, std=1.):
-        super().__init__()
-        assert out_features % 2 == 0
-        self.register_buffer('weight', torch.randn([out_features // 2, in_features]) * std) 
-
-    def forward(self, x):
-        f = 2 * 3.141592653589793 * x @ self.weight.T
-        return torch.cat([f.cos(), f.sin()], dim=-1)
 
 
 

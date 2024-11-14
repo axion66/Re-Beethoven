@@ -2,32 +2,20 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-#from flash_attn import flash_attn_func #pip install flash-attn --no-build-isolation
 from rotary_embedding_torch import RotaryEmbedding
 from layers.tools.utils import *
 from layers.tools.activations import *
 from layers.tools.norms import *
+
 try:
     from flash_attn import flash_attn_func
     FLASH_ON = True
 except:
     print("Flash attention not supported. try revising the code")
     FLASH_ON = False
-from abc import abstractmethod
-class TimestepBlockA(nn.Module):
-    """
-    Any module where forward() takes timestep embeddings as a second argument.
-    """
-
-    @abstractmethod
-    def forward(self, x, emb):
-        """
-        Apply the module to `x` given `emb` timestep embeddings.
-        """
 
 
-
-class TransformerBlock(TimestepBlockA):
+class TransformerBlock(nn.Module):
 
     def __init__(
         self,
@@ -71,7 +59,7 @@ class TransformerBlock(TimestepBlockA):
         return x
 
 
-class DiffMHAFlash(TimestepBlockA):
+class DiffMHAFlash(nn.Module):
     # https://github.com/microsoft/unilm/blob/master/Diff-Transformer/multihead_flashdiff_1.py
     # Differential Attention for precise attention score
 

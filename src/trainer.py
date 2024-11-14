@@ -16,12 +16,11 @@ import argparse
 #from layers.cores.core_raw import net
 #from layers.core_WavTokenizer import net
 import pytorch_warmup as warmup
-from layers.cores.core_UNet import net
+from layers.cores.unet import net
 
 class Trainer:
-    def __init__(self, cfg_path: str):
+    def __init__(self, cfg_path):
         
-        '''CONFIG'''
         with open(cfg_path) as stream:
             self.cfg = yaml.safe_load(stream)
             self.FFT_CFG = self.cfg['fft']
@@ -59,14 +58,16 @@ class Trainer:
         self.best_eval_loss = float('inf')
 
         
-
+        wandb_store = os.path.join(self.FILE_CFG['log_dir'],"wandb_store")
+        os.makedirs(wandb_store,exist_ok=True)
         wandb.init(
-            project="Audio Diffusion",
+            project=f"{self.FILE_CFG['project_name']}",
+            name = f"{self.FILE_CFG['run_name']}_{datetime.now().strftime('%m%d_%H-%M')}",
+            dir=wandb_store,
             config={
-                "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "No GPU available.",
+                "Device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "No GPU Detected.",
                 **self.cfg
-            },
-            name = f"run_{datetime.now().strftime('%m%d_%H-%M')}"
+            }
         )
         
 
@@ -74,7 +75,7 @@ class Trainer:
         warmup_period = config['warmup_period']
         num_steps = len(trainLoader) * config['epoch'] - warmup_period
 
-        optimizer = Adam(model.parameters(), lr=config['lr'], betas=(0.9, 0.999), weight_decay=0.1)
+        optimizer = Adam(model.parameters(), lr=config['lr'], betas=(0.9, 0.95), weight_decay=0.1)
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_steps)
         warmup_scheduler = warmup.ExponentialWarmup(optimizer, warmup_period)
 

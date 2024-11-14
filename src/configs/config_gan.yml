@@ -23,4 +23,6 @@ model:
   num_samples: 3
 file:
   audio_folder: "../dataset"
-  log_dir: "./train_log/"
+  log_dir: "../train_log/"
+  project_name: "Audio Diffusion"
+  run_name: "Aura"
