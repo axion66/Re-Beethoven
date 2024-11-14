@@ -2,7 +2,7 @@ import os
 import yaml
 import torch
 import torch.nn as nn
-from layers.gan.gan_simple import GANWrapper
+from layers.gan.simple import GANWrapper
 from torch.optim import Adam
 from layers.preprocess import load_mp3_files, create_overlapping_chunks_tensor
 from torch.utils.data import TensorDataset, DataLoader
@@ -16,7 +16,7 @@ import argparse
 #from layers.cores.core_raw import net
 #from layers.core_WavTokenizer import net
 import pytorch_warmup as warmup
-from layers.cores.core_UNet import net
+from layers.cores.unet import net
 
 class Trainer:
     def __init__(self, cfg_path: str):

@@ -11,7 +11,7 @@ from layers.tools.norms import get_norm_fn
 
 
 class net(nn.Module):
-   
+    # Should not work as it also tries to predict phase, which is just a complete randomness.
     def __init__(self,config):
         super().__init__()
         self.config = config

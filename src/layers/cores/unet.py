@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from layers.blocks.attention import DiffMHAFlash,TransformerBlock,TimestepBlockA
-import math
-from layers.tools.utils import Linear,exists
+from layers.blocks.attention import TransformerBlock
+from layers.tools.utils import Linear, FourierFeatures
+from layers.blocks.convolution import conv_nd,ResBlock,Downsample,Upsample
 from abc import abstractmethod
 
 
@@ -22,7 +22,21 @@ class TimestepBlock(nn.Module):
         Apply the module to `x` given `emb` timestep embeddings.
         """
 
-class TimestepEmbedSequential(nn.Sequential, TimestepBlock,TimestepBlockA):
+class transpose_norm_fn(TimestepBlock):
+    """
+    A Timestep class that wraps a normalization function with transpose operations.
+    """
+
+    def __init__(self, norm):
+        super().__init__()
+        self.norm = norm
+
+    def forward(self, x, emb):
+        x = x.transpose(1,-1)
+        x = self.norm(x, emb)
+        return x.transpose(1,-1)
+    
+class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
     """
     A sequential module that passes timestep embeddings to the children that
     support it as an extra input.
@@ -30,7 +44,7 @@ class TimestepEmbedSequential(nn.Sequential, TimestepBlock,TimestepBlockA):
 
     def forward(self, x, emb):
         for layer in self:
-            if isinstance(layer, TimestepBlock) or isinstance(layer,TimestepBlockA):
+            if isinstance(layer, TimestepBlock) or isinstance(layer):
                 x = layer(x, emb)
             else:
                 x = layer(x)
@@ -46,19 +60,7 @@ class Transpose(nn.Module):
     def forward(self, x):
         return x.transpose(self.dim1, self.dim2)
 
-class transpose_norm_fn(TimestepBlock):
-    """
-    A Timestep class that wraps a normalization function with transpose operations.
-    """
 
-    def __init__(self, norm):
-        super().__init__()
-        self.norm = norm
-
-    def forward(self, x, emb):
-        x = x.transpose(1,-1)
-        x = self.norm(x, emb)
-        return x.transpose(1,-1)
 
 class net(nn.Module):
     """

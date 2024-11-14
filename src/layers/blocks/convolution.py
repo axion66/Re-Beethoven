@@ -5,7 +5,17 @@ from layers.blocks.attention import DiffMHAFlash,TransformerBlock,TimestepBlockA
 import math
 from layers.tools.utils import Linear,exists
 from abc import abstractmethod
+class TimestepBlock(nn.Module):
+    """
+    Any module where forward() takes timestep embeddings as a second argument.
+    """
 
+    @abstractmethod
+    def forward(self, x, emb):
+        """
+        Apply the module to `x` given `emb` timestep embeddings.
+        """
+        
 def conv_nd(dims, *args, **kwargs):
     """
     Create a 1D, 2D, or 3D convolution module.

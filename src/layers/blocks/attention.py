@@ -6,7 +6,7 @@ from rotary_embedding_torch import RotaryEmbedding
 from layers.tools.utils import *
 from layers.tools.activations import *
 from layers.tools.norms import *
-
+from abc import abstractmethod
 try:
     from flash_attn import flash_attn_func
     FLASH_ON = True
@@ -14,8 +14,18 @@ except:
     print("Flash attention not supported. try revising the code")
     FLASH_ON = False
 
+class TimestepBlock(nn.Module):
+    """
+    Any module where forward() takes timestep embeddings as a second argument.
+    """
 
-class TransformerBlock(nn.Module):
+    @abstractmethod
+    def forward(self, x, emb):
+        """
+        Apply the module to `x` given `emb` timestep embeddings.
+        """
+
+class TransformerBlock(TimestepBlock):
 
     def __init__(
         self,

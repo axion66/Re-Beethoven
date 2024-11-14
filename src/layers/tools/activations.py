@@ -17,7 +17,7 @@ class SwiGLU(nn.Module):
 
 class SnakeBeta(nn.Module):
     # from ttps://github.com/NVIDIA/BigVGAN/blob/main/activations.py
-    
+
     """
     A modified Snake function which uses separate parameters for the magnitude of the periodic components
     Shape:
@@ -118,11 +118,11 @@ def get_activation_fn(act:Optional[str],in_chn=Optional[int]):
         return xATLU()
     elif act == "ReLU":
         return nn.ReLU()
-    elif act == "SiLU" or act == "Swish":
+    elif act == "SiLU" or act == "Swish" or act == 'silu':
         return SiLU()
     elif act == "GELU":
         return nn.GELU(approximate='tanh')
-    elif act == "SnakeBeta":
+    elif act == "snake":
         assert isinstance(in_chn,int)
         return SnakeBeta(in_chn)
     else:

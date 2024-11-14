@@ -8,19 +8,18 @@ from layers.preprocess import load_mp3_files, create_overlapping_chunks_tensor
 from torch.utils.data import TensorDataset, DataLoader
 import wandb
 from datetime import datetime
-import matplotlib.pyplot as plt
-import soundfile as sf  # For saving audio files
+import soundfile as sf  
 from tqdm import tqdm
 import argparse
-#from layers.core_cnn_STFT import net
-#from layers.cores.core_raw import net
-#from layers.core_WavTokenizer import net
 import pytorch_warmup as warmup
+
+# nets
 from layers.cores.unet import net
+#from layers.cores.raw import net
+#from layers.cores.stft import net
 
 class Trainer:
     def __init__(self, cfg_path):
-        
         with open(cfg_path) as stream:
             self.cfg = yaml.safe_load(stream)
             self.FFT_CFG = self.cfg['fft']

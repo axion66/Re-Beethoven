@@ -1,11 +1,10 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 try:
     from mamba_ssm import Mamba2
 except:
     print("Mamba not supported.")
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
 
 class MambaBlock(nn.Module):
     def __init__(
