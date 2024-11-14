@@ -39,8 +39,8 @@ class GANWrapper(nn.Module):
         x = (x - x_mean) / x_std
 
         optimizer_generator.zero_grad()
-        real_output = Variable(Tensor(x.size(0), 1).fill_(1.0), requires_grad=False) 
-        fake_output = Variable(Tensor(x.size(0), 1).fill_(0.0), requires_grad=False)
+        real_output = torch.ones(x.size(0), device=self.device) 
+        fake_output = torch.zeros(x.size(0), device=self.device) 
         x_generated = self.generator(torch.randn_like(x,device=self.device),torch.zeros((x.size(0),1),device=self.device))
         generator_loss = self.advLoss(self.discriminator(x_generated,torch.zeros((x.size(0),1),device=self.device)), real_output)
         generator_loss.backward()
