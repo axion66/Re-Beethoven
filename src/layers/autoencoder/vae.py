@@ -4,9 +4,7 @@ import torch.nn.functional as F
 import math
 import numpy as np
 
-from torchaudio import transforms as T
-from typing import Dict, Any
-from layers.tools.activations import get_activation_fn
+from ..layers.tools.activations import get_activation_fn
 
 # from https://github.com/Stability-AI/stable-audio-tools/blob/main/stable_audio_tools/models/autoencoders.py and modified
 
