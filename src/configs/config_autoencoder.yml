@@ -3,7 +3,7 @@ fft:
   win_len: 512
   hop_length: 256
   seq_len: 16384
-  overlap_ratio: 2
+  overlap_ratio: 1
   cut_first: 4000
   sr: 8000
   num_blocks: 6

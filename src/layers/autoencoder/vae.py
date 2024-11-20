@@ -243,42 +243,6 @@ class AudioAutoencoder(nn.Module):
         return decoded
    
     
-        
-def create_autoencoder_from_config(config):
-    
-    encoder = OobleckEncoder(config)
-    decoder = OobleckDecoder(config)
-    bottleneck = VAEBottleneck()
-   
-    
-        
-def create_autoencoder_from_config(config):
-    
-    encoder = OobleckEncoder(config)
-    decoder = OobleckDecoder(config)
-    bottleneck = VAEBottleneck()
-    return AudioAutoencoder(
-        encoder,
-        decoder,
-        io_channels=config['in_chn'],
-        latent_dim=config['latent_dim'],
-        downsampling_ratio=config['dodwnsampling_ratio'],
-        sample_rate=config['sr'],
-        io_channels=config['in_chn'],
-        latent_dim=config['latent_dim'],
-        downsampling_ratio=config['dodwnsampling_ratio'],
-        sample_rate=config['sr'],
-        bottleneck=bottleneck,
-        pretransform=config['pretransform'],
-        in_channels=config['in_chn'],
-        out_channels=config['out_chn'],
-        pretransform=config['pretransform'],
-        in_channels=config['in_chn'],
-        out_channels=config['out_chn'],
-    )
-
-
-
 
 '''
 class DiffusionAutoencoder(AudioAutoencoder):

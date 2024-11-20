@@ -12,7 +12,7 @@ import soundfile as sf
 from tqdm import tqdm
 import argparse
 import pytorch_warmup as warmup
-
+import numpy as np
 from layers.autoencoder.vae import AudioAutoencoder
 from layers.tools.losses import MultiResolutionSTFTLoss, RawL1Loss, EncodecDiscriminator
 
@@ -95,102 +95,120 @@ class Trainer:
     def train_discriminator(self, real_samples, fake_samples):
         self.dis_optim.zero_grad()
         
-        dis_real_loss, _, _ = self.discriminator(real_samples, real_samples)
-    
-        dis_fake_loss, _, _ = self.discriminator(fake_samples.detach(), real_samples)
-        
-        dis_loss = dis_real_loss + dis_fake_loss
+        dis_loss, real_loss, fake_loss = self.discriminator.loss(real_samples, fake_samples)
         dis_loss.backward()
-        
-        torch.nn.utils.clip_grad_norm_(self.discriminator.parameters(), max_norm=1.0)
         self.dis_optim.step()
+        
+        # Log individual components of discriminator loss
+        wandb.log({
+            "train/discriminator/dis_loss": dis_loss.item(),
+        })
         
         return dis_loss.item()
 
-    def train_generator(self, real_samples, fake_samples):
+    def train_generator(self, real_samples, fake_samples, info):
         self.gen_optim.zero_grad()
         
-        _, adv_loss, feature_matching_loss = self.discriminator(fake_samples, real_samples)
-        
+        dis_loss, adv_loss, feature_matching_loss = self.discriminator.loss(real_samples, fake_samples)
         stft_loss = self.stft_loss(fake_samples, real_samples)
         
-        
-        # Total generator loss
-        gen_loss = (
-            adv_loss + 
-            feature_matching_loss + 
-            stft_loss
-        )
+        gen_loss = adv_loss + feature_matching_loss + stft_loss + 1e-4 * info['kl']
         
         gen_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.generator.parameters(), max_norm=1.0)
         self.gen_optim.step()
         
-        return gen_loss.item()
+        # Log individual components of generator loss
+        wandb.log({
+            "train/generator/gen_loss": gen_loss.item(),
+            "train/generator/adv_loss": adv_loss.item(),
+            "train/generator/feature_matching_loss": feature_matching_loss.item(),
+            "train/generator/stft_loss": stft_loss.item(),
+            "train/generator/kl_loss": (1e-4 * info['kl']).item()
+        })
+        
+        return gen_loss.item()  
 
-    def evaluate(self):
+    def sample_and_save_audio(self, real_samples, fake_samples, epoch):
+        epoch_dir = os.path.join(self.FILE_CFG['log_dir'], f'samples/epoch_{epoch}')
+        os.makedirs(epoch_dir, exist_ok=True)
+        
+        num_samples = min(5, real_samples.size(0))
+        
+        for i in range(num_samples):
+            real_path = os.path.join(epoch_dir, f'real_sample_{i}.wav')
+            fake_path = os.path.join(epoch_dir, f'generated_sample_{i}.wav')
+            self.save_audio_sample(real_samples[i], real_path)
+            self.save_audio_sample(fake_samples[i], fake_path)
+            
+            wandb.log({
+                f"audio_samples/real_{i}": wandb.Audio(real_path, sample_rate=8000),
+                f"audio_samples/generated_{i}": wandb.Audio(fake_path, sample_rate=8000)
+            })
+
+    def save_audio_sample(self, audio_tensor, filename, sample_rate=8000):
+        if audio_tensor.dim() == 2:
+            audio_tensor = audio_tensor.squeeze(0)
+        audio_np = audio_tensor.cpu().numpy().astype(np.float32)
+        audio_np = np.clip(audio_np, -1, 1)
+        sf.write(filename, audio_np, sample_rate)
+
+    def evaluate(self, epoch):
         self.generator.eval()
         eval_losses = []
+        sample_real, sample_fake = None, None
         
         with torch.no_grad():
             for x in self.test_loader:
                 x = x[0].to(self.MODEL_CFG['device'])
                 real_samples = x.unsqueeze(1)
                 
-                latent = self.generator.encode(real_samples)
+                latent, info = self.generator.encode(real_samples, return_info=True)
                 fake_samples = self.generator.decode(latent)
                 
                 stft_loss = self.stft_loss(fake_samples, real_samples)
                 
                 eval_losses.append(stft_loss.item())
+                if sample_real is None:
+                    sample_real = real_samples.squeeze(1)
+                    sample_fake = fake_samples.squeeze(1)
+        
+        if sample_real is not None and sample_fake is not None:
+            self.sample_and_save_audio(sample_real, sample_fake, epoch)
         
         self.generator.train()
         return sum(eval_losses) / len(eval_losses)
 
     def train(self):
-        # Print model information
-        total_params = sum(p.numel() for p in self.generator.parameters() if p.requires_grad)
-        print(f"Generator trainable parameters: {total_params:,}")
-        total_params = sum(p.numel() for p in self.discriminator.parameters() if p.requires_grad)
-        print(f"Discriminator trainable parameters: {total_params:,}")
+        total_params_gen = sum(p.numel() for p in self.generator.parameters() if p.requires_grad)
+        total_params_dis = sum(p.numel() for p in self.discriminator.parameters() if p.requires_grad)
+        print(f"Generator trainable parameters: {total_params_gen:,}")
+        print(f"Discriminator trainable parameters: {total_params_dis:,}")
         
-        EPOCH = self.MODEL_CFG['epoch']
-        LOG_DIR = self.FILE_CFG['log_dir']
-        os.makedirs(LOG_DIR, exist_ok=True)
-
-        for epoch in range(EPOCH):
-            epoch_losses_gen = []
-            epoch_losses_dis = []
+        for epoch in range(self.MODEL_CFG['epoch']):
+            epoch_losses_gen, epoch_losses_dis = [], []
             
-            for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{EPOCH}")):
+            for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}")):
                 x = x[0].to(self.MODEL_CFG['device'])
                 real_samples = x.unsqueeze(1)
-                
-                # Generate fake samples
-                latent = self.generator.encode(real_samples)
+                latent, info = self.generator.encode(real_samples, return_info=True)
                 fake_samples = self.generator.decode(latent)
-                
-                # Train discriminator
-                dis_loss = self.train_discriminator(real_samples, fake_samples)
-                epoch_losses_dis.append(dis_loss)
-                
-                # Train generator
-                gen_loss = self.train_generator(real_samples, fake_samples)
-                epoch_losses_gen.append(gen_loss)
-                
-                # Warm up leearning rate
-                if self.gen_warmup.last_step + 1 >= self.MODEL_CFG['warmup_period']:
-                    self.gen_lr_scheduler.step()
-                    self.dis_lr_scheduler.step()
-                
-                wandb.log({
-                    "train/gen_loss": gen_loss,
-                    "train/dis_loss": dis_loss,
-                    "lr": self.gen_optim.param_groups[0]['lr']
-                })
+
+                if i % 2 == 0:
+                    dis_loss = self.train_discriminator(real_samples, fake_samples)
+                    epoch_losses_dis.append(dis_loss)
+                    wandb.log({"train/dis_loss": dis_loss})
+                else:
+                    gen_loss = self.train_generator(real_samples, fake_samples, info)
+                    epoch_losses_gen.append(gen_loss)
+                    wandb.log({"train/gen_loss": gen_loss})
+
+                self.gen_lr_scheduler.step()
+                self.dis_lr_scheduler.step()
+                wandb.log({"lr": self.gen_optim.param_groups[0]['lr']})
             
-            avg_gen_loss = sum(epoch_losses_gen) / len(epoch_losses_gen)
-            avg_dis_loss = sum(epoch_losses_dis) / len(epoch_losses_dis)
+            avg_gen_loss = sum(epoch_losses_gen) / max(1, len(epoch_losses_gen))
+            avg_dis_loss = sum(epoch_losses_dis) / max(1, len(epoch_losses_dis))
+            
             self.train_losses['gen'].append(avg_gen_loss)
             self.train_losses['dis'].append(avg_dis_loss)
             
@@ -199,17 +217,11 @@ class Trainer:
                 "train/epoch_dis_loss": avg_dis_loss
             })
             
-            print(f"Epoch {epoch+1}/{EPOCH}")
-            print(f"Average Generator Loss: {avg_gen_loss:.4f}")
-            print(f"Average Discriminator Loss: {avg_dis_loss:.4f}")
-            
             if (epoch + 1) % self.MODEL_CFG['evaluation_cycle'] == 0:
-                eval_loss = self.evaluate()
+                eval_loss = self.evaluate(epoch)
                 self.eval_losses.append(eval_loss)
                 wandb.log({"eval/loss": eval_loss})
-                print(f"Evaluation Loss: {eval_loss:.4f}")
                 
-                # Save best model
                 if eval_loss < self.best_eval_loss:
                     self.best_eval_loss = eval_loss
                     torch.save({
@@ -219,7 +231,7 @@ class Trainer:
                         'dis_optimizer_state_dict': self.dis_optim.state_dict(),
                         'epoch': epoch,
                         'best_eval_loss': self.best_eval_loss
-                    }, os.path.join(LOG_DIR, 'best_model.pth'))
+                    }, os.path.join(self.FILE_CFG['log_dir'], 'best_model.pth'))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
