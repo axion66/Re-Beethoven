@@ -34,6 +34,11 @@ class EncoderBlock(nn.Module):
             in_channels,
             out_channels,
             stride):
+    def __init__(
+            self,
+            in_channels,
+            out_channels,
+            stride):
         super().__init__()
 
         self.l = nn.Sequential(
@@ -119,6 +124,8 @@ class OobleckDecoder(nn.Module):
                  latent_dim=64, 
                  c_mults = [1, 2, 4, 8, 16], 
                  strides = [2, 4, 8, 8, 8],):
+                 c_mults = [1, 2, 4, 8, 16], 
+                 strides = [2, 4, 8, 8, 8],):
         super().__init__()
 
         c_mults = [1] + c_mults
@@ -156,6 +163,7 @@ class VAEBottleneck(nn.Module):
         std = nn.functional.softplus(scale) + 1e-4
         var = std * std
         logvar = torch.log(var)
+        latents = torch.randn_like(mean) * std + mean
         latents = torch.randn_like(mean) * std + mean
         kl = (mean * mean + var - logvar - 1).sum(1).mean()
         return latents, kl
@@ -246,6 +254,14 @@ def create_autoencoder_from_config(config):
     encoder = OobleckEncoder(config)
     decoder = OobleckDecoder(config)
     bottleneck = VAEBottleneck()
+   
+    
+        
+def create_autoencoder_from_config(config):
+    
+    encoder = OobleckEncoder(config)
+    decoder = OobleckDecoder(config)
+    bottleneck = VAEBottleneck()
     return AudioAutoencoder(
         encoder,
         decoder,
@@ -253,7 +269,14 @@ def create_autoencoder_from_config(config):
         latent_dim=config['latent_dim'],
         downsampling_ratio=config['dodwnsampling_ratio'],
         sample_rate=config['sr'],
+        io_channels=config['in_chn'],
+        latent_dim=config['latent_dim'],
+        downsampling_ratio=config['dodwnsampling_ratio'],
+        sample_rate=config['sr'],
         bottleneck=bottleneck,
+        pretransform=config['pretransform'],
+        in_channels=config['in_chn'],
+        out_channels=config['out_chn'],
         pretransform=config['pretransform'],
         in_channels=config['in_chn'],
         out_channels=config['out_chn'],
