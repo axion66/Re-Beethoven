@@ -290,12 +290,18 @@ class MultiResolutionSTFTLoss(nn.Module):
         n_bins (int, optional): Number of mel frequency bins. Required when scale = 'mel'. Default: None.
         scale_invariance (bool, optional): Perform an optimal scaling of the target. Default: False
     """
+    '''
+    "fft_sizes": [2048, 1024, 512, 256, 128, 64, 32],
+                    "hop_sizes": [512, 256, 128, 64, 32, 16, 8],
+                    "win_lengths": [2048, 1024, 512, 256, 128, 64, 32],
+                    "perceptual_weighting": true
+    '''
 
     def __init__(
         self,
-        fft_sizes: List[int] = [1024, 2048, 512],
-        hop_sizes: List[int] = [120, 240, 50],
-        win_lengths: List[int] = [600, 1200, 240],
+        fft_sizes: List[int] = [2048, 1024, 512, 256, 128, 64, 32],
+        hop_sizes: List[int] = [512, 256, 128, 64, 32, 16, 8],
+        win_lengths: List[int] = [2048, 1024, 512, 256, 128, 64, 32],
         w_sc: float = 1.0,
         w_log_mag: float = 1.0,
         w_lin_mag: float = 0.0,
@@ -353,4 +359,54 @@ class MultiResolutionSTFTLoss(nn.Module):
             return mrstft_loss
         else:
             return mrstft_loss, sc_mag_loss, log_mag_loss, lin_mag_loss, phs_loss
+
+
+def get_hinge_losses(score_real, score_fake):
+    gen_loss = -score_fake.mean()
+    dis_loss = torch.relu(1 - score_real).mean() + torch.relu(1 + score_fake).mean()
+    return dis_loss, gen_loss
+
+class EncodecDiscriminator(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        from encodec.msstftd import MultiScaleSTFTDiscriminator
+        self.discriminators = MultiScaleSTFTDiscriminator(filters=64,
+                                                          n_ffts=[2048, 1024, 512, 256, 128],
+                                                          hop_lengths=[512, 256, 128, 64, 32],
+                                                          win_lengths=[2048, 1024, 512, 256, 128],
+                                                          )
+
+    def forward(self, x):
+        logits, features = self.discriminators(x)
+        return logits, features
+
+    def loss(self, x, y):
+        feature_matching_distance = 0.
+        logits_true, feature_true = self.forward(x)
+        logits_fake, feature_fake = self.forward(y)
+
+        dis_loss = torch.tensor(0.)
+        adv_loss = torch.tensor(0.)
+
+        for i, (scale_true, scale_fake) in enumerate(zip(feature_true, feature_fake)):
+
+            feature_matching_distance = feature_matching_distance + sum(
+                map(
+                    lambda x, y: abs(x - y).mean(),
+                    scale_true,
+                    scale_fake,
+                )) / len(scale_true)
+
+            _dis, _adv = get_hinge_losses(
+                logits_true[i],
+                logits_fake[i],
+            )
+
+            dis_loss = dis_loss + _dis
+            adv_loss = adv_loss + _adv
+
+        return 1 * dis_loss, 0.1 * adv_loss, 5 * feature_matching_distance
+        # use dis_loss only for discriminator, and use adv_loss and feature_matching_distance for generator.
+
 
