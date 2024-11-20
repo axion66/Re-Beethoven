@@ -218,7 +218,6 @@ class AudioAutoencoder(nn.Module):
 
  
 
-<<<<<<< HEAD
     def encode(self, audio, return_info=False, **kwargs):
 
         info = {}
@@ -238,19 +237,6 @@ class AudioAutoencoder(nn.Module):
         decoded = self.decoder(latents, **kwargs)
        
         return decoded
-=======
-    def encode(self, audio, **kwargs):
-        latents = audio
-        if self.encoder is not None:
-            latents = self.encoder(latents)
-        if self.bottleneck is not None:
-            latents, _ = self.bottleneck.encode(latents, return_info=True, **kwargs)
-
-        return latents
-
-    def decode(self, latents, **kwargs):
-        return self.decoder(latents, **kwargs) 
->>>>>>> 6ee8805 (update)
    
     
 
