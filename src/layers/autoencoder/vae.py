@@ -176,8 +176,6 @@ class VAEBottleneck(nn.Module):
         else:
             return x
 
-    def decode(self, x):
-        return x
 
 
 
@@ -207,11 +205,9 @@ class AudioAutoencoder(nn.Module):
 
         self.min_length = self.downsampling_ratio
 
-        if in_channels is not None:
-            self.in_channels = in_channels
+        self.in_channels = in_channels
 
-        if out_channels is not None:
-            self.out_channels = out_channels
+        self.out_channels = out_channels
 
         self.bottleneck = bottleneck
 
@@ -222,6 +218,7 @@ class AudioAutoencoder(nn.Module):
 
  
 
+<<<<<<< HEAD
     def encode(self, audio, return_info=False, **kwargs):
 
         info = {}
@@ -241,6 +238,19 @@ class AudioAutoencoder(nn.Module):
         decoded = self.decoder(latents, **kwargs)
        
         return decoded
+=======
+    def encode(self, audio, **kwargs):
+        latents = audio
+        if self.encoder is not None:
+            latents = self.encoder(latents)
+        if self.bottleneck is not None:
+            latents, _ = self.bottleneck.encode(latents, return_info=True, **kwargs)
+
+        return latents
+
+    def decode(self, latents, **kwargs):
+        return self.decoder(latents, **kwargs) 
+>>>>>>> 6ee8805 (update)
    
     
 
