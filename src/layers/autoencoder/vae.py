@@ -34,11 +34,7 @@ class EncoderBlock(nn.Module):
             in_channels,
             out_channels,
             stride):
-    def __init__(
-            self,
-            in_channels,
-            out_channels,
-            stride):
+
         super().__init__()
 
         self.l = nn.Sequential(
@@ -124,8 +120,7 @@ class OobleckDecoder(nn.Module):
                  latent_dim=64, 
                  c_mults = [1, 2, 4, 8, 16], 
                  strides = [2, 4, 8, 8, 8],):
-                 c_mults = [1, 2, 4, 8, 16], 
-                 strides = [2, 4, 8, 8, 8],):
+               
         super().__init__()
 
         c_mults = [1] + c_mults
