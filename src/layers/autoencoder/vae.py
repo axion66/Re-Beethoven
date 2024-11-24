@@ -117,7 +117,7 @@ class OobleckDecoder(nn.Module):
     def __init__(self, 
                  out_channels=1, 
                  channels=128, 
-                 latent_dim=64, 
+                 latent_dim=128, 
                  c_mults = [1, 2, 4, 8, 16], 
                  strides = [2, 4, 8, 8, 8],):
                
@@ -176,6 +176,17 @@ class VAEBottleneck(nn.Module):
         else:
             return x
 
+class AEBottleneck(nn.Module):
+    def __init__(self):
+        super().__init__()
+        
+  
+    def encode(self, x, return_info=False, **kwargs):
+        
+        if return_info:
+            return x, {}
+        else:
+            return x
 
 
 
@@ -184,12 +195,11 @@ class AudioAutoencoder(nn.Module):
         self,
         encoder=OobleckEncoder(),
         decoder=OobleckDecoder(),
-        latent_dim=64, 
         # chn increases 1 -> 128 -> 256 ... 2048 -> 32(VAE) -> 32(VAE) -> 2048 -> ... 1
         downsampling_ratio=2048,
         sample_rate=8000,
         io_channels=1,
-        bottleneck = VAEBottleneck(),
+        bottleneck = AEBottleneck(),
         in_channels = 1,
         out_channels = 1,
     ):
@@ -198,7 +208,6 @@ class AudioAutoencoder(nn.Module):
         self.downsampling_ratio = downsampling_ratio
         self.sample_rate = sample_rate
 
-        self.latent_dim = latent_dim
         self.io_channels = io_channels
         self.in_channels = io_channels
         self.out_channels = io_channels

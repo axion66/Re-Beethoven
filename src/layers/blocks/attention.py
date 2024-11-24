@@ -25,6 +25,10 @@ class TimestepBlock(nn.Module):
         Apply the module to `x` given `emb` timestep embeddings.
         """
 
+def modulate(x, shift, scale):
+    return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+
+
 class TransformerBlock(TimestepBlock):
 
     def __init__(
@@ -32,7 +36,6 @@ class TransformerBlock(TimestepBlock):
         embed_dim,
         depth,
         num_heads,
-        sigma_dim=256,
         norm_fn=None,
         activation_fn=None,
         p=0.1
@@ -49,24 +52,55 @@ class TransformerBlock(TimestepBlock):
 
         self.attn = DiffMHAFlash(embed_dim=embed_dim, 
                                        depth=depth,
-                                       num_heads=num_heads,
-                                       sigma_dim=sigma_dim)
+                                       num_heads=num_heads       
+                                )
         self.ff = PositionwiseFeedForward(dims=embed_dim,
                                           activation=activation_fn if exists(activation_fn) else nn.SiLU(),
                                           rate=4,
                                           dropout=p
                                           )
 
-    def forward(self, x,emb):
+
+        self.gamma_1 = nn.Linear(embed_dim, embed_dim)
+        self.beta_1 = nn.Linear(embed_dim, embed_dim)
+        self.gamma_2 = nn.Linear(embed_dim, embed_dim)
+        self.beta_2 = nn.Linear(embed_dim, embed_dim)
+        self.scale_1 = nn.Linear(embed_dim, embed_dim)
+        self.scale_2 = nn.Linear(embed_dim, embed_dim)
+
+        nn.init.zeros_(self.gamma_1.weight)
+        nn.init.zeros_(self.beta_1.weight)
+        nn.init.zeros_(self.gamma_1.bias)
+        nn.init.zeros_(self.beta_1.bias)  
+
+        nn.init.zeros_(self.gamma_2.weight)
+        nn.init.zeros_(self.beta_2.weight)
+        nn.init.zeros_(self.gamma_2.bias)
+        nn.init.zeros_(self.beta_2.bias)  
+
+        nn.init.zeros_(self.scale_1.weight)
+        nn.init.zeros_(self.scale_2.weight)
+        nn.init.zeros_(self.scale_1.bias)
+        nn.init.zeros_(self.scale_2.bias)  
+        
+    def forward(self, x, emb):
         '''
         Get x: [batch,seq,embed_dim]
-        Get sigmas: [batch,head_dim]
+        Get sigmas: [batch, embed_dim]
         '''
-
-        x = self.ln1(self.attn(x,emb) + x)
-        x = self.ln2(self.ff(x) + x)
-
+        # UPDATE Nov 24: Use adaLN-zero instead of adding sigmas.
+        scale_msa = self.gamma_1(emb)
+        shift_msa = self.beta_1(emb)
+        scale_mlp = self.gamma_2(emb)
+        shift_mlp = self.beta_2(emb)
+        gate_msa = self.scale_1(emb).unsqueeze(1)
+        gate_mlp = self.scale_2(emb).unsqueeze(1)
+        
+        x = self.attn(modulate(self.ln1(x), shift_msa, scale_msa)) * gate_msa + x
+        x = self.ff(modulate(self.ln2(x), shift_mlp, scale_mlp)) * gate_mlp + x
+    
         return x
+
 
 
 class DiffMHAFlash(nn.Module):
@@ -79,7 +113,6 @@ class DiffMHAFlash(nn.Module):
         embed_dim, # freq_bins for orig
         depth, # layer num. [1 to N layer]
         num_heads, # best for 2?, as one can focus on low_freq and one can focus on high freq (like RoPE)
-        sigma_dim
     ):
         super().__init__()
         self.embed_dim = embed_dim
@@ -99,7 +132,6 @@ class DiffMHAFlash(nn.Module):
                                       cache_if_possible=False, 
                                       use_xpos=False)
 
-        self.sigma_rotate = Linear(sigma_dim,self.head_dim,bias=False)
     def reset_lambda(self,depth):
         self.lambda_init = 0.8 - 0.6 * math.exp(-0.3 * depth)
         self.lambda_q1 = nn.Parameter(torch.zeros(self.head_dim, dtype=torch.float32).normal_(mean=0,std=0.1))
@@ -115,34 +147,26 @@ class DiffMHAFlash(nn.Module):
     
     def forward(
         self,
-        x,
-        sigmas
-    ):  
+        x
+        ):   # NOV 24: remove adding sigmas, but rather use adaLN-zero in transformer level.
         b, seq_len, embed_dim = x.size()
         assert embed_dim == self.embed_dim
-        # QKV Split
 
-        sigmas = self.sigma_rotate(sigmas)
         q,k,v = torch.chunk(self.qkv(x),dim=-1,chunks=3)
         q = q.view(b, seq_len, 2 * self.num_heads, self.head_dim)   # batch, seq_len, 2 * n, h
         k = k.view(b, seq_len, 2 * self.num_heads, self.head_dim)   # batch, seq_len, 2 * n, h
-        v = v.view(b, seq_len, self.num_heads, 2, self.head_dim)   # batch, seq_len, n,  2 * h
+        v = v.view(b, seq_len, self.num_heads, 2, self.head_dim)    # batch, seq_len, n,  2 * h
         
-        # Apply RoPE            - (Think This's best option for positional embedding)
-        q = self.rotary.rotate_queries_or_keys(q)
-        k = self.rotary.rotate_queries_or_keys(k)
+        q = self.rotary.rotate_queries_or_keys(q,seq_dim=1)
+        k = self.rotary.rotate_queries_or_keys(k,seq_dim=1)
 
-        # Reshape Q, K, Sigmas
         q = q.reshape(b, seq_len, self.num_heads, 2, self.head_dim)
         k = k.reshape(b, seq_len, self.num_heads, 2, self.head_dim)
         q1, q2 = q[:, :, :, 0], q[:, :, :, 1] 
         k1, k2 = k[:, :, :, 0], k[:, :, :, 1]
         v1, v2 = v[:, :, :, 0], v[:, :, :, 1]
-        sigmas = sigmas.unsqueeze(1).unsqueeze(1)   # batch,1,1,head_dim
-
-        q2 =  q2 + sigmas #somehow in-place not wokring as I used torch.view (on top)
-        k2 =  k2 + sigmas
-        #v2 =  v2 + sigmas
+        
+       
         # Differential Attention
         if FLASH_ON:
             # Convert inputs to float16
@@ -155,13 +179,13 @@ class DiffMHAFlash(nn.Module):
             k2_fp16 = k2.to(dtype=torch.float16)
             
             # First attention pair
-            attn11 = flash_attn_func(q1_fp16, k1_fp16, v1_fp16, causal=True).to(dtype=torch.float32)
-            attn12 = flash_attn_func(q1_fp16, k1_fp16, v2_fp16, causal=True).to(dtype=torch.float32)
-            attn1 = torch.cat([attn11, attn12], dim=-1)
+            attn11 = flash_attn_func(q1_fp16, k1_fp16, v1_fp16, causal=True)
+            attn12 = flash_attn_func(q1_fp16, k1_fp16, v2_fp16, causal=True)
+            attn1 = torch.cat([attn11, attn12], dim=-1) 
             
             # Second attention pair
-            attn21 = flash_attn_func(q2_fp16, k2_fp16, v1_fp16, causal=True).to(dtype=torch.float32)
-            attn22 = flash_attn_func(q2_fp16, k2_fp16, v2_fp16, causal=True).to(dtype=torch.float32)
+            attn21 = flash_attn_func(q2_fp16, k2_fp16, v1_fp16, causal=True)
+            attn22 = flash_attn_func(q2_fp16, k2_fp16, v2_fp16, causal=True)
             attn2 = torch.cat([attn21, attn22], dim=-1)
         else:
             # Use regular qkv attention
@@ -175,9 +199,6 @@ class DiffMHAFlash(nn.Module):
         
         attn = self.ln(attn1 - self.lmd(q) * attn2) * (1 - self.lambda_init)
 
-
-        # Reshape and Linear projection
-        attn = attn.reshape(b, seq_len, self.embed_dim)
         return self.out(attn)
     
     
