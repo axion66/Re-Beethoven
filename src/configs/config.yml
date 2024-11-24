@@ -16,7 +16,7 @@ model:
   device: "cuda:0"
   batch_size: 64
   lr: 0.0003
-  warmup_period: 4000,
+  warmup_period: 4000
   num_workers: 14
   evaluation_cycle: 15
   sampling_steps: 100
