@@ -8,3 +8,6 @@ matplotlib
 soundfile
 flash-attn
 pytorch_warmup
+mamba-ssm
+causal_conv1d
+encodec

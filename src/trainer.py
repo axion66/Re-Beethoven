@@ -8,30 +8,43 @@ from layers.preprocess import load_mp3_files, create_overlapping_chunks_tensor
 from torch.utils.data import TensorDataset, DataLoader
 import wandb
 from datetime import datetime
-import matplotlib.pyplot as plt
-import soundfile as sf  # For saving audio files
+import soundfile as sf  
 from tqdm import tqdm
 import argparse
-#from layers.core_cnn_STFT import net
-from layers.core_raw import net
-#from layers.core_WavTokenizer import net
-#from layers.core_UNet import UNetWithMHA
 import pytorch_warmup as warmup
 
+# nets
+from layers.cores.unet import net
+#from layers.cores.raw import net
+#from layers.cores.stft import net
 
 class Trainer:
-    def __init__(self, cfg_path: str):
-        
-        '''CONFIG'''
+    def __init__(self, cfg_path):
         with open(cfg_path) as stream:
-            self.BASE_CFG = yaml.safe_load(stream)
+            self.cfg = yaml.safe_load(stream)
             self.FFT_CFG = self.cfg['fft']
             self.MODEL_CFG = self.cfg['model']
             self.FILE_CFG = self.cfg['file']
 
         '''MODEL'''
-        self.net = net(self.FFT_CFG)
-        self.model = Denoiser(model=self.net, sigma_data=0.5,device=torch.device(self.MODEL_CFG['device'])).to(self.MODEL_CFG['device'])
+        #self.net = net(self.FFT_CFG)
+        self.net = net(
+            in_channels=1,               # e.g., for RGB images
+            model_channels=64,           # Base number of channels
+            out_channels=1,              # Typically same as input for autoencoders
+            num_res_blocks=2,            # Number of ResBlocks per level
+            attention_resolutions=[2],# Apply attention at 1/4 and 1/8 resolutions
+            dropout=0.1,                 # Dropout rate
+            channel_mult=(1, 2, 4, 8),   # Channel multiplier for each level
+            conv_resample=True,          # Use convolutional down/upsampling
+            dims=1,                      # 2D data (e.g., images)
+            use_fp16=False,              # Use float16 for memory efficiency
+            num_heads=4,                 # Attention heads for TransformerBlock
+            use_scale_shift_norm=True,   # Use scale-shift normalization
+            resblock_updown=True         # Use ResBlock for up/downsampling
+        )
+        print("Model prepared.")
+        self.model = Denoiser(self.FFT_CFG,model=self.net, sigma_data=0.5,device=torch.device(self.MODEL_CFG['device'])).to(self.MODEL_CFG['device'])
         
 
         '''Loader'''
@@ -44,14 +57,16 @@ class Trainer:
         self.best_eval_loss = float('inf')
 
         
-
+        wandb_store = os.path.join(self.FILE_CFG['log_dir'],"wandb_store")
+        os.makedirs(wandb_store,exist_ok=True)
         wandb.init(
-            project="Audio Diffusion",
+            project=f"{self.FILE_CFG['project_name']}",
+            name = f"{self.FILE_CFG['run_name']}_{datetime.now().strftime('%m%d_%H-%M')}",
+            dir=wandb_store,
             config={
-                "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "No GPU available.",
+                "Device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "No GPU Detected.",
                 **self.cfg
-            },
-            name = f"run_{datetime.now().strftime('%m%d_%H-%M')}"
+            }
         )
         
 
@@ -59,13 +74,18 @@ class Trainer:
         warmup_period = config['warmup_period']
         num_steps = len(trainLoader) * config['epoch'] - warmup_period
 
-        optimizer = Adam(model.parameters(), lr=config['lr'], betas=(0.9, 0.999), weight_decay=0.1)
+        optimizer = Adam(model.parameters(), lr=config['lr'], betas=(0.9, 0.95), weight_decay=0.1)
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_steps)
         warmup_scheduler = warmup.ExponentialWarmup(optimizer, warmup_period)
 
         return optimizer,lr_scheduler,warmup_scheduler
  
     def train(self):
+        for name, param in self.net.named_parameters():
+            print(f"Layer: {name} | Size: {param.size()}") 
+        total_params = sum(p.numel() for p in self.net.parameters() if p.requires_grad)  
+        print(f"Total trainable parameters: {total_params:,}")
+        
         EPOCH = self.MODEL_CFG['epoch']
         LOG_DIR = self.FILE_CFG['log_dir']
         os.makedirs(LOG_DIR, exist_ok=True)
@@ -88,7 +108,7 @@ class Trainer:
                 
                 # Timestamp Loss, LR
                 EPOCH_LOSS.append(loss.item())
-                wandb.log({"timestamp_loss": loss.item(), "lr": self.model_optimizer.param_groups[0]['lr']})
+                wandb.log({"timestamp_loss": loss.item(), "lr": self.optim.param_groups[0]['lr']})
 
             # Epoch Loss
             avg_train_loss = sum(EPOCH_LOSS) / len(EPOCH_LOSS)
@@ -116,11 +136,13 @@ class Trainer:
                     torch.save(self.model.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
 
                 STORE_SAMPLE_DIR = os.path.join(LOG_DIR, f"samples_epoch_{epoch+1}")
-                self.generate_samples(
-                    num_samples=self.MODEL_CFG['num_samples'],
-                    num_steps=self.MODEL_CFG['sampling_steps'],
-                    output_dir=STORE_SAMPLE_DIR
-                )
+                for idx in range(self.MODEL_CFG['num_samples']):
+                    self.generate_samples(
+                        num_samples=1,#self.MODEL_CFG['num_samples'],
+                        num_steps=self.MODEL_CFG['sampling_steps'][idx],
+                        output_dir=STORE_SAMPLE_DIR,
+                        idx=idx
+                    )
 
                 for i in range(self.MODEL_CFG['num_samples']):
                     sample_path = os.path.join(STORE_SAMPLE_DIR, f"Sample_{i}.wav")
@@ -151,7 +173,8 @@ class Trainer:
             self,
             num_samples: int,
             num_steps: int,
-            output_dir: str
+            output_dir: str,
+            idx: int
         ) -> None:
         os.makedirs(output_dir, exist_ok=True)
 
@@ -160,7 +183,7 @@ class Trainer:
 
         for i in range(num_samples):
             sample = generated_samples[i].cpu().numpy().flatten()
-            filename = os.path.join(output_dir, f"Sample_{i}.wav")
+            filename = os.path.join(output_dir, f"Sample_{idx}.wav")
             sf.write(filename, sample, self.FFT_CFG['sr'])
 
         print(f"Generated {num_samples} samples and saved to {output_dir}")

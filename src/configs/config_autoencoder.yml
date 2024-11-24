@@ -3,7 +3,7 @@ fft:
   win_len: 512
   hop_length: 256
   seq_len: 16384
-  overlap_ratio: 2
+  overlap_ratio: 1
   cut_first: 4000
   sr: 8000
   num_blocks: 6
@@ -14,15 +14,6 @@ fft:
 model:
   epoch: 1000000
   device: "cuda:0"
-<<<<<<< HEAD
-  batch_size: 64
-  lr: 0.0003
-  warmup_period: 4000
-  num_workers: 14
-  evaluation_cycle: 15
-  sampling_steps: 100
-  num_samples: 4
-=======
   batch_size: 8
   lr: 0.00015
   warmup_period: 4000
@@ -30,7 +21,6 @@ model:
   evaluation_cycle: 1
   sampling_steps: [50, 100, 100]
   num_samples: 3
->>>>>>> b723c79bb0dffcfa9c35cd2345c2f9e4ebf4820f
 file:
   audio_folder: "../dataset"
   log_dir: "../train_log/"
