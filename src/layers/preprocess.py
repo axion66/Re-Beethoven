@@ -20,6 +20,7 @@ def stereo_to_mono(waveform:T,dim=-1):
         waveform = waveform.mean(dim=0).unsqueeze(0)
     return waveform  
 
+
 def divide(tensor:T,n,cut_first):
     '''
         get [1, length] tensor
@@ -32,7 +33,6 @@ def divide(tensor:T,n,cut_first):
      
      
 def resample(waveform:T, orig_sr:int,new_sr:int,kaisier_best=True):
-    # TODO: better to use torchaudio.transforms.resample for caching. [if all orig_sr are the same]
     if kaisier_best:
         return torchaudio.functional.resample(waveform, orig_freq=orig_sr, new_freq=new_sr,lowpass_filter_width=64, \
                                             rolloff=0.94759371674,resampling_method="sinc_interp_kaiser",beta=14.76965645938)

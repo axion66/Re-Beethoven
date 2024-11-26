@@ -176,6 +176,8 @@ class VAEBottleneck(nn.Module):
         else:
             return x
 
+    def decode(self,x):
+        return x
 class AEBottleneck(nn.Module):
     def __init__(self):
         super().__init__()
@@ -187,7 +189,8 @@ class AEBottleneck(nn.Module):
             return x, {}
         else:
             return x
-
+    def decode(self,x):
+        return x
 
 
 class AudioAutoencoder(nn.Module):

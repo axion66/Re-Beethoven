@@ -6,26 +6,87 @@ from typing import List, Any
 # https://github.com/csteinmetz1/auraloss/tree/main
 # paper suggests L1 Loss & MR is the best performing one..
 
-class RawL1Loss(nn.Module):
+class Loss(nn.Module):
+    def __init__(self,*args,**kwargs):
+        super().__init__()
+        
+    
+class LossModule:
+    def __init__(self, name):
+        self.name = name
+        self.losses : list = []
+        self.discriminator_step = 0
+        
+    def append(self, name, weight_loss, module: Loss):
+        self.losses.append(
+            {
+                "name": name,
+                "weight": weight_loss,
+                "module": module,
+            }
+            
+        )
+        
+    def loss_fn(self, x, y):
+
+        total_loss = 0.0
+        info = {}
+        
+        for loss_module in self.losses:
+            
+            name = loss_module['name']
+            weight = loss_module['weight']
+            
+            l = loss_module['module'](x, y)
+            l *= weight
+            total_loss += l
+            info.update({name : l})
+            '''
+            if name.startswith("Discri") or name.startswith("discri"): # meaning discriminator
+                self.discriminator_step += 1
+                if (self.discriminator_step%2 == 0 and self.discriminator_step < 20000):  # then discriminator
+                    l = loss_module['module'].loss(x.unsqueeze(1), y.unsqueeze(1))
+                    l_total = l[0] + l[1] +  l[2]
+                    l_total *= weight
+                    info = {}
+                    info.update({
+                        f"{name}/dis_loss":l[0] * weight,
+                        f"{name}/adv_loss": l[1] * weight,
+                        f"{name}/feature_matching_loss": l[2] * weight,
+                    })
+                    return l_total, info
+                
+                
+            else:
+                l = loss_module['module'](x, y)
+                l *= weight
+                total_loss += l
+                info.update({name : l})
+            '''
+        info.update({"total loss": total_loss})
+        
+        return total_loss, info
+    
+class L1Loss(Loss):
     def __init__(self,distance='mean'):
         super().__init__()
         self.loss = nn.L1Loss(reduction=distance)
     def forward(self,x,y):
-        return self.loss(x,y)
+        return self.loss(x, y)
 
-class SpectralConvergenceLoss(nn.Module):
+class SpectralConvergenceLoss(Loss):
     """Spectral convergence loss module.
 
     See [Arik et al., 2018](https://arxiv.org/abs/1808.06719).
     """
 
     def __init__(self):
-        super(SpectralConvergenceLoss, self).__init__()
+        super().__init__()
 
     def forward(self, x_mag, y_mag):
         return (torch.norm(y_mag - x_mag, p="fro", dim=[-1, -2]) / torch.norm(y_mag, p="fro", dim=[-1, -2])).mean()
 
-class STFTMagnitudeLoss(nn.Module):
+class STFTMagnitudeLoss(Loss):
     """STFT magnitude loss module.
 
     See [Arik et al., 2018](https://arxiv.org/abs/1808.06719)
@@ -67,7 +128,7 @@ class STFTMagnitudeLoss(nn.Module):
             y_mag = torch.log(self.log_fac * y_mag + self.log_eps)
         return self.distance(x_mag, y_mag)
 
-class STFTLoss(nn.Module):
+class STFTLoss(Loss):
     """STFT loss module.
 
     See [Yamamoto et al. 2019](https://arxiv.org/abs/1904.04472).
@@ -148,7 +209,6 @@ class STFTLoss(nn.Module):
         self.reduction = reduction
         self.mag_distance = mag_distance
         self.device = device
-
         self.phs_used = bool(self.w_phs)
 
         self.spectralconv = SpectralConvergenceLoss()
@@ -175,23 +235,25 @@ class STFTLoss(nn.Module):
 
             if self.scale == "mel":
                 assert sample_rate != None  # Must set sample rate to use mel scale
-                assert n_bins <= fft_size  # Must be more FFT bins than Mel bins
-                fb = librosa.filters.mel(sr=sample_rate, n_fft=fft_size, n_mels=n_bins)
+                assert 32 <= fft_size  # Must be more FFT bins than Mel bins
+                fb = librosa.filters.mel(sr=sample_rate, n_fft=fft_size, n_mels=32)
                 fb = torch.tensor(fb).unsqueeze(0)
 
             elif self.scale == "chroma":
                 assert sample_rate != None  # Must set sample rate to use chroma scale
-                assert n_bins <= fft_size  # Must be more FFT bins than chroma bins
+                assert 32 <= fft_size  # Must be more FFT bins than chroma bins
                 fb = librosa.filters.chroma(
-                    sr=sample_rate, n_fft=fft_size, n_chroma=n_bins
+                    sr=sample_rate, n_fft=fft_size, n_chroma=32
                 )
+                torch.tensor(fb).unsqueeze(0)
 
             else:
                 raise ValueError(
                     f"Invalid scale: {self.scale}. Must be 'mel' or 'chroma'."
                 )
 
-            self.register_buffer("fb", fb)
+       
+            self.register_buffer("fb", torch.tensor(fb))
 
         if scale is not None and device is not None:
             self.fb = self.fb.to(self.device)  # move filterbank to device
@@ -227,7 +289,6 @@ class STFTLoss(nn.Module):
         return x_mag, x_phs
 
     def forward(self, input: torch.Tensor, target: torch.Tensor):
-        bs, chs, seq_len = input.size()
 
         # compute the magnitude and phase spectra of input and target
         self.window = self.window.to(input.device)
@@ -267,7 +328,7 @@ class STFTLoss(nn.Module):
         elif self.output == "full":
             return loss, sc_mag_loss, log_mag_loss, lin_mag_loss, phs_loss
 
-class MultiResolutionSTFTLoss(nn.Module):
+class MultiResolutionSTFTLoss(Loss):
     """Multi resolution STFT loss module.
 
     See [Yamamoto et al., 2019](https://arxiv.org/abs/1910.11480)
@@ -361,27 +422,27 @@ class MultiResolutionSTFTLoss(nn.Module):
             return mrstft_loss, sc_mag_loss, log_mag_loss, lin_mag_loss, phs_loss
 
 
+
+
 def get_hinge_losses(score_real, score_fake):
     gen_loss = -score_fake.mean()
     dis_loss = torch.relu(1 - score_real).mean() + torch.relu(1 + score_fake).mean()
     return dis_loss, gen_loss
 
 class EncodecDiscriminator(nn.Module):
-    def __init__(self):
+
+    def __init__(self, *args, **kwargs):
         super().__init__()
 
         from encodec.msstftd import MultiScaleSTFTDiscriminator
-        self.discriminators = MultiScaleSTFTDiscriminator(filters=64,
-                                                          n_ffts=[2048, 1024, 512, 256, 128],
-                                                          hop_lengths=[512, 256, 128, 64, 32],
-                                                          win_lengths=[2048, 1024, 512, 256, 128],
-                                                          )
+
+        self.discriminators = MultiScaleSTFTDiscriminator(filters=64)
 
     def forward(self, x):
         logits, features = self.discriminators(x)
         return logits, features
 
-    def loss(self, x, y):
+    def loss(self, y, x):
         feature_matching_distance = 0.
         logits_true, feature_true = self.forward(x)
         logits_fake, feature_fake = self.forward(y)
@@ -406,7 +467,56 @@ class EncodecDiscriminator(nn.Module):
             dis_loss = dis_loss + _dis
             adv_loss = adv_loss + _adv
 
+        return dis_loss, adv_loss, feature_matching_distance
+
+
+
+'''
+class EncodecDiscriminator(Loss):
+    def __init__(self):
+        super().__init__()
+
+        from encodec.msstftd import MultiScaleSTFTDiscriminator
+        self.discriminators = MultiScaleSTFTDiscriminator(filters=64,
+                                                          n_ffts=[2048, 1024, 512, 256, 128],
+                                                          hop_lengths=[512, 256, 128, 64, 32],
+                                                          win_lengths=[2048, 1024, 512, 256, 128],
+                                                          )
+
+    def _forward(self, x):
+        logits, features = self.discriminators(x)
+        return logits, features
+
+    def get_hinge_losses(self, score_real, score_fake):
+        gen_loss = -score_fake.mean() # why not (1 - score_Fake)?
+        dis_loss = torch.relu(1 - score_real).mean() + torch.relu(1 + score_fake).mean()
+        return dis_loss, gen_loss
+    
+    def forward(self, y, x): # fake for y, true for x
+        feature_matching_distance = 0.
+        logits_true, feature_true = self._forward(x)
+        logits_fake, feature_fake = self._forward(y)
+
+        dis_loss = torch.tensor(0.)
+        adv_loss = torch.tensor(0.)
+
+        for i, (scale_true, scale_fake) in enumerate(zip(feature_true, feature_fake)):
+
+            feature_matching_distance = feature_matching_distance + sum(
+                map(
+                    lambda x, y: abs(x - y).mean(),
+                    scale_true,
+                    scale_fake,
+                )) / len(scale_true)
+
+            _dis, _adv = self.get_hinge_losses(
+                logits_true[i],
+                logits_fake[i],
+            )
+
+            dis_loss = dis_loss + _dis
+            adv_loss = adv_loss + _adv
+
         return 1 * dis_loss, 0.1 * adv_loss, 5 * feature_matching_distance
         # use dis_loss only for discriminator, and use adv_loss and feature_matching_distance for generator.
-
-
+'''
