@@ -5,7 +5,7 @@ fft:
   seq_len: 16384
   overlap_ratio: 2
   cut_first: 4000
-  sr: 8000
+  sr: 8192
   num_blocks: 6
   activation_fn: "SiLU"
   norm_fn: "RMSNorm"
@@ -15,8 +15,8 @@ fft:
   num_heads: 8
 model:
   epoch: 1000000
-  device: "cuda:0"
-  batch_size: 8
+  device: "cpu"
+  batch_size: 1
   lr: 0.00015
   warmup_period: 4000
   num_workers: 6

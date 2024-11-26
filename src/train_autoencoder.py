@@ -2,22 +2,17 @@ import os
 import yaml
 import torch
 import torch.nn as nn
-from layers.diffusion.karras import Denoiser
 from torch.optim import Adam
 from layers.preprocess import load_mp3_files, create_overlapping_chunks_tensor
 from torch.utils.data import TensorDataset, DataLoader
-import wandb
 from datetime import datetime
 import soundfile as sf  
 from tqdm import tqdm
+import wandb
 import argparse
 import pytorch_warmup as warmup
-
-# nets
-from layers.cores.unet import net
-#from layers.cores.raw import net
-#from layers.cores.stft import net
-
+from layers.autoencoder.vae import AudioAutoencoder
+from layers.tools.losses import *
 class Trainer:
     def __init__(self, cfg_path):
         with open(cfg_path) as stream:
@@ -27,29 +22,32 @@ class Trainer:
             self.FILE_CFG = self.cfg['file']
 
         '''MODEL'''
-        #self.net = net(self.FFT_CFG)
-        self.net = net(
-            in_channels=1,               # e.g., for RGB images
-            model_channels=64,           # Base number of channels
-            out_channels=1,              # Typically same as input for autoencoders
-            num_res_blocks=2,            # Number of ResBlocks per level
-            attention_resolutions=[2],# Apply attention at 1/4 and 1/8 resolutions
-            dropout=0.1,                 # Dropout rate
-            channel_mult=(1, 2, 4, 8),   # Channel multiplier for each level
-            conv_resample=True,          # Use convolutional down/upsampling
-            dims=1,                      # 2D data (e.g., images)
-            use_fp16=False,              # Use float16 for memory efficiency
-            num_heads=4,                 # Attention heads for TransformerBlock
-            use_scale_shift_norm=True,   # Use scale-shift normalization
-            resblock_updown=True         # Use ResBlock for up/downsampling
+        self.net = AudioAutoencoder(
+            sample_rate=self.FFT_CFG['sr'],
+            downsampling_ratio=self.FFT_CFG['downsampling_ratio']
         )
-        print("Model prepared.")
-        self.model = Denoiser(self.FFT_CFG,model=self.net, sigma_data=0.5,device=torch.device(self.MODEL_CFG['device'])).to(self.MODEL_CFG['device'])
         
-
+        self.loss = LossModule(name="AutoEncoder")
+        #self.loss.append("discriminator", weight_loss=1.0, module=EncodecDiscriminator())
+        self.loss.append("mrstft", weight_loss=2.0, module=MultiResolutionSTFTLoss(
+            sample_rate=self.FFT_CFG['sr'],
+          
+        ))
+        self.loss.append("L1", weight_loss=1.0,module=L1Loss())
+        
+        
         '''Loader'''
         self.train_loader, self.test_loader = self.getLoader()
-        self.optim, self.lr_schedule,self.warmup_schedule = self.getOptimizer(model=self.net, trainLoader=self.train_loader, config=self.MODEL_CFG)
+        
+        
+        warmup_period = self.MODEL_CFG['warmup_period']
+        num_steps = len(self.train_loader) * self.MODEL_CFG['epoch'] - warmup_period
+
+        self.optim = Adam(self.net.parameters(), lr=self.MODEL_CFG['lr'], betas=(0.9, 0.95), weight_decay=0.1)
+        self.lr_schedule = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim, T_max=num_steps)
+        self.warmup_schedule = warmup.ExponentialWarmup(self.optim, warmup_period)
+        
+        
         
         '''LOG'''
         self.train_losses = []
@@ -59,26 +57,20 @@ class Trainer:
         
         wandb_store = os.path.join(self.FILE_CFG['log_dir'],"wandb_store")
         os.makedirs(wandb_store,exist_ok=True)
+       
         wandb.init(
-            project=f"{self.FILE_CFG['project_name']}",
+            project=f"autoencoder_{self.FILE_CFG['project_name']}",
             name = f"{self.FILE_CFG['run_name']}_{datetime.now().strftime('%m%d_%H-%M')}",
             dir=wandb_store,
             config={
                 "Device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "No GPU Detected.",
                 **self.cfg
-            }
+            },
+            mode='offline'
+            
         )
-        
+    
 
-    def getOptimizer(self, model, trainLoader, config):
-        warmup_period = config['warmup_period']
-        num_steps = len(trainLoader) * config['epoch'] - warmup_period
-
-        optimizer = Adam(model.parameters(), lr=config['lr'], betas=(0.9, 0.95), weight_decay=0.1)
-        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_steps)
-        warmup_scheduler = warmup.ExponentialWarmup(optimizer, warmup_period)
-
-        return optimizer,lr_scheduler,warmup_scheduler
  
     def train(self):
         for name, param in self.net.named_parameters():
@@ -97,8 +89,12 @@ class Trainer:
 
             for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{EPOCH}")):
                 self.optim.zero_grad()
-                x = x[0].to(self.MODEL_CFG['device'])
-                loss = self.model.loss_fn(x)
+                
+                x = x[0].to(self.MODEL_CFG['device']).squeeze(1)
+       
+                latents = self.net.encode(x)
+                decoded = self.net.decode(latents).squeeze(1)
+                loss,info = self.loss.loss_fn(decoded, x)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=1.0)
                 self.optim.step()
@@ -108,11 +104,16 @@ class Trainer:
                 
                 # Timestamp Loss, LR
                 EPOCH_LOSS.append(loss.item())
-                wandb.log({"timestamp_loss": loss.item(), "lr": self.optim.param_groups[0]['lr']})
+                wandb.log({"timestamp_loss": loss.item(), 
+                           "lr": self.optim.param_groups[0]['lr'],
+                           })
+                wandb.log(info)
+                print(f" loss info: {info}")
 
             # Epoch Loss
             avg_train_loss = sum(EPOCH_LOSS) / len(EPOCH_LOSS)
             self.train_losses.append(avg_train_loss)
+            print(f"train loss: {avg_train_loss}")
             wandb.log({"train_loss": avg_train_loss})
             print(f"Epoch {epoch+1}/{EPOCH}, Average Train Loss: {avg_train_loss:.4f}")
 
@@ -121,9 +122,16 @@ class Trainer:
                 self.net.eval()
                 EVAL_LOSS = []
                 with torch.no_grad():
-                    for x in self.test_loader:
+                    STORE_SAMPLE_DIR = os.path.join(LOG_DIR, f"samples_epoch_{epoch+1}")
+                    for idx,x in enumerate(self.test_loader):
                         x = x[0].to(self.MODEL_CFG['device']) # list to TEnsor
-                        loss = self.model.loss_fn(x)
+                        latents = self.net.encode(x)
+                        decoded = self.net.decode(latents).squeeze(1)
+                        
+                        loss,_ = self.loss.loss_fn(decoded,x)
+                        
+                        
+                        self.generate_samples(decoded,output_dir=STORE_SAMPLE_DIR)
                         EVAL_LOSS.append(loss.item())
             
                 avg_eval_loss = sum(EVAL_LOSS) / len(EVAL_LOSS)
@@ -133,8 +141,8 @@ class Trainer:
 
                 if avg_eval_loss < self.best_eval_loss:
                     self.best_eval_loss = avg_eval_loss
-                    torch.save(self.model.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
-
+                    torch.save(self.net.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
+                '''
                 STORE_SAMPLE_DIR = os.path.join(LOG_DIR, f"samples_epoch_{epoch+1}")
                 for idx in range(self.MODEL_CFG['num_samples']):
                     self.generate_samples(
@@ -147,6 +155,7 @@ class Trainer:
                 for i in range(self.MODEL_CFG['num_samples']):
                     sample_path = os.path.join(STORE_SAMPLE_DIR, f"Sample_{i}.wav")
                     wandb.log({f"Sample {i}": wandb.Audio(sample_path, sample_rate=self.FFT_CFG['sr'])})
+                '''
                 self.net.train()
 
             
@@ -171,22 +180,17 @@ class Trainer:
 
     def generate_samples(
             self,
-            num_samples: int,
-            num_steps: int,
+            x,
             output_dir: str,
-            idx: int
         ) -> None:
         os.makedirs(output_dir, exist_ok=True)
 
-        with torch.no_grad():
-            generated_samples = self.model.sample(num_samples,num_steps)
-
-        for i in range(num_samples):
-            sample = generated_samples[i].cpu().numpy().flatten()
-            filename = os.path.join(output_dir, f"Sample_{idx}.wav")
+        for i in range(x.size(0)):
+            sample = x[i].cpu().numpy().flatten()
+            filename = os.path.join(output_dir, f"Sample_{i}.wav")
             sf.write(filename, sample, self.FFT_CFG['sr'])
 
-        print(f"Generated {num_samples} samples and saved to {output_dir}")
+        print(f"Generated {x.size(0)} samples and saved to {output_dir}")
 
     
     

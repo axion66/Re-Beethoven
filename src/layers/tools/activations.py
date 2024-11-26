@@ -63,7 +63,7 @@ class SnakeBeta(nn.Module):
         self.alpha.requires_grad = alpha_trainable
         self.beta.requires_grad = alpha_trainable
 
-        self.no_div_by_zero = 0.000000001
+        self.no_div_by_zero = 1e-9
 
     def forward(self, x):
         """
@@ -111,18 +111,18 @@ def get_activation_fn(act:Optional[str],in_chn=Optional[int]):
         
         Default: SiLU
     """
-    if act == "SwiGLU":
+    if act == "SwiGLU" or act == 'swiglu':
         assert isinstance(in_chn,int)
         return SwiGLU(in_chn=in_chn)
-    elif act == "xATLU":
+    elif act == "xATLU" or act == 'xatlu':
         return xATLU()
-    elif act == "ReLU":
+    elif act == "ReLU" or act == 'relu':
         return nn.ReLU()
     elif act == "SiLU" or act == "Swish" or act == 'silu':
         return SiLU()
-    elif act == "GELU":
+    elif act == "GELU" or act == 'gelu':
         return nn.GELU(approximate='tanh')
-    elif act == "snake":
+    elif act == "snake" or act == "SnakeBeta":
         assert isinstance(in_chn,int)
         return SnakeBeta(in_chn)
     else:
