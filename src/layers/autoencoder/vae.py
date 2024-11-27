@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 import numpy as np
-
+import math
 from layers.tools.activations import get_activation_fn
 
 # from https://github.com/Stability-AI/stable-audio-tools/blob/main/stable_audio_tools/models/autoencoders.py and modified
@@ -24,9 +24,19 @@ class TemporalResBlock(nn.Module):
             nn.Conv1d(in_channels=out_channels, out_channels=out_channels,
                       kernel_size=1)
         )
-
+        self.beta = nn.Parameter(torch.zeros(1, dtype=torch.float32).normal_(mean=0,std=0.1))
+        
     def forward(self, x):
-        return x + self.layers(x)
+        '''
+        
+            Shao, J., Hu, K., Wang, C., Xue, X., & Raj, B. (2020). 
+            Is normalization indispensable for training deep neural network? 
+            Advances in Neural Information Processing Systems, 33, 13434-13444. (link, pdf)
+            
+            
+            -> normalization-free method.
+        '''
+        return ((1 - self.beta**2)**0.5) * x + self.beta * self.layers(x)
 
 class EncoderBlock(nn.Module):
     def __init__(
