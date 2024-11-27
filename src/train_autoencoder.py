@@ -25,15 +25,16 @@ class Trainer:
         self.net = AudioAutoencoder(
             sample_rate=self.FFT_CFG['sr'],
             downsampling_ratio=self.FFT_CFG['downsampling_ratio']
-        )
+        ).to(self.MODEL_CFG['device'])
         
         self.loss = LossModule(name="AutoEncoder")
-        #self.loss.append("discriminator", weight_loss=1.0, module=EncodecDiscriminator())
-        self.loss.append("mrstft", weight_loss=2.0, module=MultiResolutionSTFTLoss(
-            sample_rate=self.FFT_CFG['sr'],
-          
-        ))
-        self.loss.append("L1", weight_loss=1.0,module=L1Loss())
+        
+        # This one was the problemtic one. I need to train this crazy-ass Discriminator, not use it as a loss!!!!
+        #self.loss.append("discriminator", weight_loss=1.0, module=)
+        
+        self.loss.append("mrstft", weight_loss=3.0, module=MultiResolutionSTFTLoss(
+            sample_rate=self.FFT_CFG['sr']).to(self.MODEL_CFG['device']))
+        #self.loss.append("L1", weight_loss=0.1,module=L1Loss().to(self.MODEL_CFG['device']))
         
         
         '''Loader'''
@@ -43,10 +44,15 @@ class Trainer:
         warmup_period = self.MODEL_CFG['warmup_period']
         num_steps = len(self.train_loader) * self.MODEL_CFG['epoch'] - warmup_period
 
-        self.optim = Adam(self.net.parameters(), lr=self.MODEL_CFG['lr'], betas=(0.9, 0.95), weight_decay=0.1)
-        self.lr_schedule = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim, T_max=num_steps)
-        self.warmup_schedule = warmup.ExponentialWarmup(self.optim, warmup_period)
-        
+        self.discriminator = EncodecDiscriminator().to(self.MODEL_CFG['device'])
+        self.optim_dis = Adam(self.discriminator.parameters(), lr=self.MODEL_CFG['lr'])
+        self.lr_schedule_dis = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim_dis, T_max=num_steps)
+        self.warmup_schedule_dis = warmup.ExponentialWarmup(self.optim_dis, warmup_period)
+
+        # In __init__
+        self.optim_gen = Adam(self.net.parameters(), lr=self.MODEL_CFG['lr'])
+        self.lr_schedule_gen = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim_gen, T_max=num_steps)
+        self.warmup_schedule_gen = warmup.ExponentialWarmup(self.optim_gen, warmup_period)
         
         
         '''LOG'''
@@ -66,7 +72,6 @@ class Trainer:
                 "Device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "No GPU Detected.",
                 **self.cfg
             },
-            mode='offline'
             
         )
     
@@ -88,32 +93,61 @@ class Trainer:
             EPOCH_LOSS = []
 
             for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{EPOCH}")):
-                self.optim.zero_grad()
+                
                 
                 x = x[0].to(self.MODEL_CFG['device']).squeeze(1)
-       
                 latents = self.net.encode(x)
-                decoded = self.net.decode(latents).squeeze(1)
-                loss,info = self.loss.loss_fn(decoded, x)
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=1.0)
-                self.optim.step()
-                with self.warmup_schedule.dampening():
-                    if self.warmup_schedule.last_step + 1 >= self.MODEL_CFG['warmup_period']:
-                        self.lr_schedule.step()
+                decoded = self.net.decode(latents)
+
                 
+                
+                if (self.loss.discriminator_step % 2 == 0):
+                    '''
+                        note that discriminator itself is a trainable model.
+                            The generator(adv_loss, feature_matching_loss) is connected w/ the diffusion model,
+                            while the dis_loss is also connected w/ the diffusion model indirectly.
+                    '''
+                    loss, _, _ = self.discriminator.loss(decoded.unsqueeze(1),x.unsqueeze(1))
+                    self.optim_dis.zero_grad()
+                    loss.backward()
+                    self.optim_dis.step()
+                    with self.warmup_schedule_dis.dampening():
+                        if self.warmup_schedule_dis.last_step + 1 >= self.MODEL_CFG['warmup_period']:
+                            self.lr_schedule_dis.step()
+                    info = {
+                        "discriminator/dis_loss" : loss
+                    }
+                
+                else:
+                    loss, info = self.loss.loss_fn(decoded, x)
+                    _, adv_loss, feature_matching_loss = self.discriminator.loss(decoded.unsqueeze(1), x.unsqueeze(1))
+                    loss = loss + adv_loss + feature_matching_loss
+                    info.update(
+                        {
+                            'discriminator/adv_loss':adv_loss,
+                            "discriminator/feature_matching_loss": feature_matching_loss
+                        }
+                    )
+                    
+                    self.optim_gen.zero_grad()
+                    loss.backward()
+                    self.optim_gen.step()
+                    with self.warmup_schedule_gen.dampening():
+                        if self.warmup_schedule_gen.last_step + 1 >= self.MODEL_CFG['warmup_period']:
+                            self.lr_schedule_gen.step()
+                            
+                self.loss.discriminator_step += 1
+                        
                 # Timestamp Loss, LR
                 EPOCH_LOSS.append(loss.item())
-                wandb.log({"timestamp_loss": loss.item(), 
-                           "lr": self.optim.param_groups[0]['lr'],
+                wandb.log({"timestamp_loss": loss, 
+                           "lr": self.optim_gen.param_groups[0]['lr'],
                            })
                 wandb.log(info)
-                print(f" loss info: {info}")
 
             # Epoch Loss
             avg_train_loss = sum(EPOCH_LOSS) / len(EPOCH_LOSS)
             self.train_losses.append(avg_train_loss)
-            print(f"train loss: {avg_train_loss}")
             wandb.log({"train_loss": avg_train_loss})
             print(f"Epoch {epoch+1}/{EPOCH}, Average Train Loss: {avg_train_loss:.4f}")
 
@@ -126,7 +160,7 @@ class Trainer:
                     for idx,x in enumerate(self.test_loader):
                         x = x[0].to(self.MODEL_CFG['device']) # list to TEnsor
                         latents = self.net.encode(x)
-                        decoded = self.net.decode(latents).squeeze(1)
+                        decoded = self.net.decode(latents)
                         
                         loss,_ = self.loss.loss_fn(decoded,x)
                         
@@ -138,7 +172,8 @@ class Trainer:
                 self.eval_losses.append(avg_eval_loss)
                 wandb.log({"eval_loss": avg_eval_loss})
                 print(f"Evaluation Loss: {avg_eval_loss:.4f}")
-
+                
+                
                 if avg_eval_loss < self.best_eval_loss:
                     self.best_eval_loss = avg_eval_loss
                     torch.save(self.net.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
@@ -189,8 +224,9 @@ class Trainer:
             sample = x[i].cpu().numpy().flatten()
             filename = os.path.join(output_dir, f"Sample_{i}.wav")
             sf.write(filename, sample, self.FFT_CFG['sr'])
+            wandb.log({f"Sample {i}": wandb.Audio(sample, sample_rate=self.FFT_CFG['sr'])})
 
-        print(f"Generated {x.size(0)} samples and saved to {output_dir}")
+     
 
     
     

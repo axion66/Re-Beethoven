@@ -233,6 +233,9 @@ class AudioAutoencoder(nn.Module):
     def encode(self, audio, return_info=False, **kwargs):
 
         info = {}
+        while (audio.dim() != 3):
+            audio = audio.unsqueeze(1) if audio.dim() < 3 else audio.squeeze(1)
+            
         latents = self.encoder(audio)
 
         latents, bottleneck_info = self.bottleneck.encode(latents, return_info=True, **kwargs)
@@ -248,6 +251,8 @@ class AudioAutoencoder(nn.Module):
         latents = self.bottleneck.decode(latents)
         decoded = self.decoder(latents, **kwargs)
        
+        while (decoded.dim() != 2):
+            decoded = decoded.squeeze(1) if decoded.dim() > 2 else decoded.unsqueeze(1)
         return decoded
    
     

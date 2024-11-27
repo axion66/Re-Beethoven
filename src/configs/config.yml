@@ -2,29 +2,29 @@ fft:
   n_fft: 512
   win_len: 512
   hop_length: 256
-  seq_len: 16384
+  seq_len: 32768
   overlap_ratio: 2
   cut_first: 4000
-  sr: 8192
-  num_blocks: 6
-  activation_fn: "SiLU"
-  norm_fn: "RMSNorm"
-  dropout: 0.2
-  num_evaluation: 64
+  sr: 16000
+  num_blocks: 16
+  activation_fn: "snake"
+  norm_fn: "LayerNorm"
+  dropout: 0.1
+  num_evaluation: 4
   downsampling_ratio: 2048
   num_heads: 8
 model:
-  epoch: 1000000
-  device: "cpu"
-  batch_size: 1
+  epoch: 200
+  device: "cuda:0"
+  batch_size: 4
   lr: 0.00015
   warmup_period: 4000
-  num_workers: 6
+  num_workers: 42
   evaluation_cycle: 1
   sampling_steps: [50, 100, 100]
   num_samples: 3
 file:
   audio_folder: "../dataset"
   log_dir: "../train_log/"
-  project_name: "Autoencoder"
-  run_name: "Aura"
+  project_name: "DiffusionwithAutoencoder"
+  run_name: "1127Wed-seoul"

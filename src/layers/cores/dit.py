@@ -32,13 +32,13 @@ class net(nn.Module):
         norm_fn = get_norm_fn(config['norm_fn'])
         p = config['dropout']
         num_heads = config['num_heads']
-        sigma_dim = self.embed_dim
         
         self.map_sigma = nn.Sequential(
-            FourierFeatures(1, sigma_dim),
-            Linear(sigma_dim, sigma_dim*4), 
-            nn.SiLU(),  # can't use SnakeBeta as dimention of (B,C,T) is required, but in this case we have (B, C)
-            Linear(sigma_dim*4, sigma_dim), 
+            FourierFeatures(1, self.embed_dim),
+            Linear(self.embed_dim, self.embed_dim*4), 
+            nn.SiLU(),
+            Linear(self.embed_dim*4, self.embed_dim),
+            nn.SiLU()
         )
 
         self.transformer = nn.ModuleList(
