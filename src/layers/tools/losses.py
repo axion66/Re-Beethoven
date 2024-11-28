@@ -461,7 +461,6 @@ def get_hinge_losses(score_real, score_fake):
     gen_loss = -score_fake.mean()
     dis_loss = torch.relu(1 - score_real).mean() + torch.relu(1 + score_fake).mean()
     return dis_loss, gen_loss
-
 class EncodecDiscriminator(nn.Module):
 
     def __init__(self, *args, **kwargs):
@@ -469,19 +468,30 @@ class EncodecDiscriminator(nn.Module):
 
         from encodec.msstftd import MultiScaleSTFTDiscriminator
 
-        self.discriminators = MultiScaleSTFTDiscriminator(filters=64)
+        self.discriminators = MultiScaleSTFTDiscriminator(filters=64,*args, **kwargs)
 
     def forward(self, x):
         logits, features = self.discriminators(x)
         return logits, features
+
+    def discriminator_hinge_loss(self, score_real, score_fake):
+        dis_loss = torch.relu(1 - score_real).mean() + torch.relu(1 + score_fake).mean()
+        return dis_loss
+
+    def generator_hinge_loss(self, score_fake):
+        gen_loss = -score_fake.mean()
+        return gen_loss
 
     def loss(self, x, y):
         feature_matching_distance = 0.
         logits_true, feature_true = self.forward(x)
         logits_fake, feature_fake = self.forward(y)
 
-        dis_loss = torch.tensor(0.)
-        adv_loss = torch.tensor(0.)
+        dis_loss = torch.tensor(0., device=x.device)
+        adv_loss = torch.tensor(0., device=x.device)
+
+        # Detach y for the discriminator loss computation
+        logits_fake_detached, _ = self.forward(y.detach())
 
         for i, (scale_true, scale_fake) in enumerate(zip(feature_true, feature_fake)):
 
@@ -492,18 +502,20 @@ class EncodecDiscriminator(nn.Module):
                     scale_fake,
                 )) / len(scale_true)
 
-            _dis, _adv = get_hinge_losses(
+            # Discriminator loss should use detached logits
+            _dis = self.discriminator_hinge_loss(
                 logits_true[i],
+                logits_fake_detached[i],
+            )
+            dis_loss = dis_loss + _dis
+
+            # Adversarial loss should use non-detached logits
+            _adv = self.generator_hinge_loss(
                 logits_fake[i],
             )
-
-            dis_loss = dis_loss + _dis
             adv_loss = adv_loss + _adv
 
-        return dis_loss, adv_loss, feature_matching_distance
-
-
-
+        return dis_loss, 0.1 * adv_loss, 5 * feature_matching_distance
 '''
 class EncodecDiscriminator(Loss):
     def __init__(self):

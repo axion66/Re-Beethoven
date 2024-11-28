@@ -141,8 +141,8 @@ class Trainer:
                         decoded = self.net.decode(latents)
                         loss,_ = self.loss.loss_fn(x.unsqueeze(1), decoded.unsqueeze(1))
                         
-                        self.generate_samples(decoded,output_dir=FAKE_DIR)
-                        self.generate_samples(x,output_dir=ORIG_DIR)
+                        self.generate_samples(decoded,output_dir=FAKE_DIR, name="fake")
+                        self.generate_samples(x,output_dir=ORIG_DIR, name="real")
                         
                         EVAL_LOSS.append(loss.detach().cpu().item())
             
@@ -158,11 +158,11 @@ class Trainer:
            
                 self.net.train()
 
-            if ((epoch+1) % 10 == 0):
+            if ((epoch) % 10 == 0):
                 for name, module in self.net.named_modules():
                     if hasattr(module, 'weight') and module.weight.grad is not None:
                         wandb.log({f"gradients/{name}.weight": wandb.Histogram(module.weight.grad.cpu().numpy())})
-                    if hasattr(module, 'bias') and module.bias.grad is not None:
+                    if hasattr(module, 'bias') and module.bias is not None and module.bias.grad is not None:
                         wandb.log({f"gradients/{name}.bias": wandb.Histogram(module.bias.grad.cpu().numpy())})
 
 
@@ -187,13 +187,14 @@ class Trainer:
             self,
             x,
             output_dir: str,
+            name: str,
         ) -> None:
         os.makedirs(output_dir, exist_ok=True)
         for i in range(x.size(0)):
             sample = x[i].cpu().numpy().flatten()
             filename = os.path.join(output_dir, f"Sample_{i}.wav")
             sf.write(filename, sample, self.FFT_CFG['sr'])
-            wandb.log({f"{output_dir}/Sample {i}": wandb.Audio(sample, sample_rate=self.FFT_CFG['sr'])})
+            wandb.log({f"{name}/Sample {i}": wandb.Audio(sample, sample_rate=self.FFT_CFG['sr'])})
 
      
 
