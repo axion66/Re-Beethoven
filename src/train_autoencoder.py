@@ -2,7 +2,7 @@ import os
 import yaml
 import torch
 import torch.nn as nn
-from torch.optim import Adam
+from torch.optim import AdamW,Adam
 from layers.preprocess import load_mp3_files, create_overlapping_chunks_tensor
 from torch.utils.data import TensorDataset, DataLoader
 from datetime import datetime
@@ -28,39 +28,26 @@ class Trainer:
         ).to(self.MODEL_CFG['device'])
         
         self.loss = LossModule(name="AutoEncoder")
-        
-        # This one was the problemtic one. I need to train this crazy-ass Discriminator, not use it as a loss!!!!
-        #self.loss.append("discriminator", weight_loss=1.0, module=)
-        
-        self.loss.append("mrstft", weight_loss=3.0, module=MultiResolutionSTFTLoss(
+        self.loss.append("mrstft", weight_loss=0.25, module=MultiResolutionSTFTLoss(
             sample_rate=self.FFT_CFG['sr']).to(self.MODEL_CFG['device']))
-        #self.loss.append("L1", weight_loss=0.1,module=L1Loss().to(self.MODEL_CFG['device']))
-        
-        
-        '''Loader'''
-        self.train_loader, self.test_loader = self.getLoader()
-        
-        
-        warmup_period = self.MODEL_CFG['warmup_period']
-        num_steps = len(self.train_loader) * self.MODEL_CFG['epoch'] - warmup_period
+        self.loss.append("L1", weight_loss=0.1,module=L1Loss().to(self.MODEL_CFG['device']))        
 
+        
+        
+        
+        #warmup_period = self.MODEL_CFG['warmup_period']
         self.discriminator = EncodecDiscriminator().to(self.MODEL_CFG['device'])
-        self.optim_dis = Adam(self.discriminator.parameters(), lr=self.MODEL_CFG['lr'])
-        self.lr_schedule_dis = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim_dis, T_max=num_steps)
-        self.warmup_schedule_dis = warmup.ExponentialWarmup(self.optim_dis, warmup_period)
-
-        # In __init__
-        self.optim_gen = Adam(self.net.parameters(), lr=self.MODEL_CFG['lr'])
-        self.lr_schedule_gen = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim_gen, T_max=num_steps)
-        self.warmup_schedule_gen = warmup.ExponentialWarmup(self.optim_gen, warmup_period)
+        self.optim_dis = AdamW(self.discriminator.parameters(), lr=self.MODEL_CFG['lr'] * 2, betas=(0.8,0.99))
+        #self.lr_schedule_dis = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim_dis, T_max=num_steps)
+        #self.warmup_schedule_dis = warmup.ExponentialWarmup(self.optim_dis, warmup_period)
+        self.optim_gen = AdamW(self.net.parameters(), lr=self.MODEL_CFG['lr'], betas=(0.8,0.99))
+        #self.lr_schedule_gen = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim_gen, T_max=num_steps)
+        #self.warmup_schedule_gen = warmup.ExponentialWarmup(self.optim_gen, warmup_period)
         
         
         '''LOG'''
-        self.train_losses = []
-        self.eval_losses = []
-        self.best_eval_loss = float('inf')
-
-        
+        self.best_eval_loss = 1e+7
+        self.train_loader, self.test_loader = self.getLoader()
         wandb_store = os.path.join(self.FILE_CFG['log_dir'],"wandb_store")
         os.makedirs(wandb_store,exist_ok=True)
        
@@ -90,86 +77,76 @@ class Trainer:
 
         for epoch in range(self.MODEL_CFG['epoch']):
             
-            EPOCH_LOSS = []
+            epochloss = []
 
             for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{EPOCH}")):
-                
-                
-                x = x[0].to(self.MODEL_CFG['device']).squeeze(1)
+                info = {}
+                x = x[0].to(self.MODEL_CFG['device']).unsqueeze(1)  # batch, 1, seq
                 latents = self.net.encode(x)
-                decoded = self.net.decode(latents)
+                decoded = self.net.decode(latents).unsqueeze(1) # batch, 1, seq
 
                 
+                dis_loss, adv_loss, feature_matching_loss = self.discriminator.loss(x, decoded)
                 
                 if (self.loss.discriminator_step % 2 == 0):
-                    '''
-                        note that discriminator itself is a trainable model.
-                            The generator(adv_loss, feature_matching_loss) is connected w/ the diffusion model,
-                            while the dis_loss is also connected w/ the diffusion model indirectly.
-                    '''
-                    loss, _, _ = self.discriminator.loss(decoded.unsqueeze(1),x.unsqueeze(1))
+                    
                     self.optim_dis.zero_grad()
-                    loss.backward()
+                    dis_loss.backward()
                     self.optim_dis.step()
-                    with self.warmup_schedule_dis.dampening():
-                        if self.warmup_schedule_dis.last_step + 1 >= self.MODEL_CFG['warmup_period']:
-                            self.lr_schedule_dis.step()
-                    info = {
-                        "discriminator/dis_loss" : loss
-                    }
-                
+                    
+                    info.update({"discriminator/dis_loss" : dis_loss})
                 else:
-                    loss, info = self.loss.loss_fn(decoded, x)
-                    _, adv_loss, feature_matching_loss = self.discriminator.loss(decoded.unsqueeze(1), x.unsqueeze(1))
-                    loss = loss + adv_loss + feature_matching_loss
-                    info.update(
-                        {
-                            'discriminator/adv_loss':adv_loss,
-                            "discriminator/feature_matching_loss": feature_matching_loss
-                        }
-                    )
+                    loss, info_loss_fn = self.loss.loss_fn(x, decoded)
+                    gen_loss = loss + adv_loss + feature_matching_loss
                     
                     self.optim_gen.zero_grad()
-                    loss.backward()
+                    gen_loss.backward()
                     self.optim_gen.step()
-                    with self.warmup_schedule_gen.dampening():
-                        if self.warmup_schedule_gen.last_step + 1 >= self.MODEL_CFG['warmup_period']:
-                            self.lr_schedule_gen.step()
-                            
+                    
+                    info.update(
+                        {
+                            **info_loss_fn,
+                            'discriminator/adv_loss': adv_loss,
+                            "discriminator/feature_matching_loss": feature_matching_loss,
+                            "generator_loss": gen_loss
+                        }
+                    )
+                    epochloss.append(gen_loss.item()) 
+                              
                 self.loss.discriminator_step += 1
-                        
-                # Timestamp Loss, LR
-                EPOCH_LOSS.append(loss.item())
-                wandb.log({"timestamp_loss": loss, 
-                           "lr": self.optim_gen.param_groups[0]['lr'],
-                           })
+                       
+                info.update({
+                    "lr/lr_dis": self.optim_dis.param_groups[0]['lr'],
+                    "lr/lr_gen": self.optim_gen.param_groups[0]['lr'],
+                    }
+                ) 
+               
                 wandb.log(info)
 
-            # Epoch Loss
-            avg_train_loss = sum(EPOCH_LOSS) / len(EPOCH_LOSS)
-            self.train_losses.append(avg_train_loss)
-            wandb.log({"train_loss": avg_train_loss})
-            print(f"Epoch {epoch+1}/{EPOCH}, Average Train Loss: {avg_train_loss:.4f}")
+            wandb.log({"Average Generator Loss": sum(epochloss) / len(epochloss)})
+            print(f"Epoch {epoch+1}/{EPOCH}, Average Generator Loss: {sum(epochloss) / len(epochloss)}")
 
-            # Evaluation & Sampling
+
             if (epoch + 1) % self.MODEL_CFG['evaluation_cycle'] == 0:
                 self.net.eval()
-                EVAL_LOSS = []
                 with torch.no_grad():
-                    STORE_SAMPLE_DIR = os.path.join(LOG_DIR, f"samples_epoch_{epoch+1}")
+                    EVAL_LOSS = []
+                    FAKE_DIR = os.path.join(LOG_DIR, f"generated_epoch_{epoch+1}")
+                    ORIG_DIR = os.path.join(LOG_DIR, f"original_epoch_{epoch+1}")
+                    os.makedirs(FAKE_DIR, exist_ok=True)
+                    os.makedirs(ORIG_DIR, exist_ok=True)
                     for idx,x in enumerate(self.test_loader):
-                        x = x[0].to(self.MODEL_CFG['device']) # list to TEnsor
+                        x = x[0].to(self.MODEL_CFG['device'])
                         latents = self.net.encode(x)
                         decoded = self.net.decode(latents)
+                        loss,_ = self.loss.loss_fn(x.unsqueeze(1), decoded.unsqueeze(1))
                         
-                        loss,_ = self.loss.loss_fn(decoded,x)
+                        self.generate_samples(decoded,output_dir=FAKE_DIR)
+                        self.generate_samples(x,output_dir=ORIG_DIR)
                         
-                        
-                        self.generate_samples(decoded,output_dir=STORE_SAMPLE_DIR)
-                        EVAL_LOSS.append(loss.item())
+                        EVAL_LOSS.append(loss.detach().cpu().item())
             
                 avg_eval_loss = sum(EVAL_LOSS) / len(EVAL_LOSS)
-                self.eval_losses.append(avg_eval_loss)
                 wandb.log({"eval_loss": avg_eval_loss})
                 print(f"Evaluation Loss: {avg_eval_loss:.4f}")
                 
@@ -177,23 +154,16 @@ class Trainer:
                 if avg_eval_loss < self.best_eval_loss:
                     self.best_eval_loss = avg_eval_loss
                     torch.save(self.net.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
-                '''
-                STORE_SAMPLE_DIR = os.path.join(LOG_DIR, f"samples_epoch_{epoch+1}")
-                for idx in range(self.MODEL_CFG['num_samples']):
-                    self.generate_samples(
-                        num_samples=1,#self.MODEL_CFG['num_samples'],
-                        num_steps=self.MODEL_CFG['sampling_steps'][idx],
-                        output_dir=STORE_SAMPLE_DIR,
-                        idx=idx
-                    )
-
-                for i in range(self.MODEL_CFG['num_samples']):
-                    sample_path = os.path.join(STORE_SAMPLE_DIR, f"Sample_{i}.wav")
-                    wandb.log({f"Sample {i}": wandb.Audio(sample_path, sample_rate=self.FFT_CFG['sr'])})
-                '''
+                    print(f"Best model saved at {LOG_DIR}/best_model.pth")
+           
                 self.net.train()
 
-            
+            if ((epoch+1) % 10 == 0):
+                for name, module in self.net.named_modules():
+                    if hasattr(module, 'weight') and module.weight.grad is not None:
+                        wandb.log({f"gradients/{name}.weight": wandb.Histogram(module.weight.grad.cpu().numpy())})
+                    if hasattr(module, 'bias') and module.bias.grad is not None:
+                        wandb.log({f"gradients/{name}.bias": wandb.Histogram(module.bias.grad.cpu().numpy())})
 
 
 
@@ -219,12 +189,11 @@ class Trainer:
             output_dir: str,
         ) -> None:
         os.makedirs(output_dir, exist_ok=True)
-
         for i in range(x.size(0)):
             sample = x[i].cpu().numpy().flatten()
             filename = os.path.join(output_dir, f"Sample_{i}.wav")
             sf.write(filename, sample, self.FFT_CFG['sr'])
-            wandb.log({f"Sample {i}": wandb.Audio(sample, sample_rate=self.FFT_CFG['sr'])})
+            wandb.log({f"{output_dir}/Sample {i}": wandb.Audio(sample, sample_rate=self.FFT_CFG['sr'])})
 
      
 

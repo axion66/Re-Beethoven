@@ -127,7 +127,7 @@ class OobleckDecoder(nn.Module):
     def __init__(self, 
                  out_channels=1, 
                  channels=128, 
-                 latent_dim=128, 
+                 latent_dim=64, 
                  c_mults = [1, 2, 4, 8, 16], 
                  strides = [2, 4, 8, 8, 8],):
                
@@ -138,6 +138,7 @@ class OobleckDecoder(nn.Module):
         self.depth = len(c_mults)
 
         layers = [
+            get_activation_fn("snake", in_chn=latent_dim),
             nn.Conv1d(in_channels=latent_dim, out_channels=c_mults[-1]*channels, kernel_size=7, padding=3),
         ]
         
@@ -188,6 +189,7 @@ class VAEBottleneck(nn.Module):
 
     def decode(self,x):
         return x
+    
 class AEBottleneck(nn.Module):
     def __init__(self):
         super().__init__()
@@ -212,7 +214,7 @@ class AudioAutoencoder(nn.Module):
         downsampling_ratio=2048,
         sample_rate=8000,
         io_channels=1,
-        bottleneck = AEBottleneck(),
+        bottleneck = VAEBottleneck(),
         in_channels = 1,
         out_channels = 1,
     ):
