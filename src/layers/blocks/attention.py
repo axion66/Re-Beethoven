@@ -8,12 +8,16 @@ from layers.tools.activations import *
 from layers.tools.norms import *
 from abc import abstractmethod
 from einops import rearrange
+from einops.layers.torch import Rearrange
+
 try:
     from flash_attn import flash_attn_func
     FLASH_ON = True
 except:
     print("Flash attention not supported. try revising the code")
     FLASH_ON = False
+    
+    
 
 class TimestepBlock(nn.Module):
     """
@@ -35,7 +39,6 @@ class TransformerBlock(TimestepBlock):
         depth,
         num_heads,
         norm_fn=None,
-        activation_fn=None,
         p=0.1
     ):
         super().__init__()
@@ -45,31 +48,33 @@ class TransformerBlock(TimestepBlock):
         self.num_heads = num_heads
 
 
-        self.ln1 = norm_fn(embed_dim) if exists(norm_fn) else LayerNorm(embed_dim)
-        self.ln2 = norm_fn(embed_dim) if exists(norm_fn) else LayerNorm(embed_dim)
+        self.norm_1 = norm_fn(embed_dim) if exists(norm_fn) else LayerNorm(embed_dim)
+        self.norm_2 = norm_fn(embed_dim) if exists(norm_fn) else LayerNorm(embed_dim)
 
         self.attn = DifferentialAttention(
             embed_dim=embed_dim, 
             depth=depth,
             num_heads=num_heads     
         )
-        self.ff = PositionwiseFeedForward(
-            dims=embed_dim,
-            activation=activation_fn if exists(activation_fn) else nn.SiLU(),
-            rate=4,
-            dropout=p
+        
+        self.ff = nn.Sequential(
+            nn.Linear(embed_dim,embed_dim*4),
+            Rearrange('b l c -> b c l'),
+            SnakeBeta(in_features=embed_dim*4),
+            Rearrange('b c l -> b l c'),
+            nn.Linear(embed_dim*4,embed_dim)
         )
         
         self.set_adaLN(embed_dim)  
         
     def set_adaLN(self, embed_dim):
         #   AdaLN-zero
-        self.gamma_1 = nn.Linear(embed_dim, embed_dim)
-        self.beta_1 = nn.Linear(embed_dim, embed_dim)
-        self.gamma_2 = nn.Linear(embed_dim, embed_dim)
-        self.beta_2 = nn.Linear(embed_dim, embed_dim)
-        self.scale_1 = nn.Linear(embed_dim, embed_dim)
-        self.scale_2 = nn.Linear(embed_dim, embed_dim)
+        self.gamma_1 = nn.Linear(embed_dim, embed_dim, bias=True)
+        self.beta_1 = nn.Linear(embed_dim, embed_dim, bias=True)
+        self.gamma_2 = nn.Linear(embed_dim, embed_dim, bias=True)
+        self.beta_2 = nn.Linear(embed_dim, embed_dim, bias=True)
+        self.scale_1 = nn.Linear(embed_dim, embed_dim, bias=True)
+        self.scale_2 = nn.Linear(embed_dim, embed_dim, bias=True)
 
         nn.init.zeros_(self.gamma_1.weight)
         nn.init.zeros_(self.beta_1.weight)
@@ -103,14 +108,14 @@ class TransformerBlock(TimestepBlock):
         gate_mlp = self.scale_2(emb).unsqueeze(1)
         
         res = x
-        x = self.ln1(x)
+        x = self.norm_1(x)
         x = x * (1 + scale_msa) + shift_msa
         x = self.attn(x)
         x = x * torch.sigmoid(1 - gate_msa) # not original adaLN-zero, but from stable audio paper.
         x = x + res
         
         res = x
-        x = self.ln2(x)
+        x = self.norm_2(x)
         x = x * (1 + scale_mlp) + shift_mlp
         x = self.ff(x)
         x = x * torch.sigmoid(1 - gate_mlp)

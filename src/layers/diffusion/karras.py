@@ -84,13 +84,12 @@ class Denoiser(nn.Module):
         b, device = x.shape[0], x.device
 
         # std transform
-        x_mean,x_std = x.mean(dim=-1,keepdim=True),x.std(dim=-1,keepdim=True)
+        x_mean, x_std = x.mean(dim=-1,keepdim=True),x.std(dim=-1,keepdim=True)
         x = (x - x_mean) * self.sigma_data / x_std
             
         # noise
         #mask = torch.rand_like(x) < 0.95  #70 will be noise, while other 30 will be unnoised.
         sigmas = self.sigma_noise(num_samples=b)
-        noise = torch.randn_like(x) * sigmas
         x_noised = x + (torch.randn_like(x) * sigmas) # randn_like * sigmas == noise
 
 
@@ -99,7 +98,6 @@ class Denoiser(nn.Module):
         x = (x - c_skip * x_noised) / c_out # instead of transforming the x_denoised, we transform the original x.
 
         loss = self._weighting_snr(sigmas) * ((x_denoised - x)**2)
-        #print(f"weight: {self._weighting_snr(sigmas)} \n loss: {loss}, \n w/o weight: {loss / self._weighting_snr(sigmas)}")
         return loss.reshape(-1).mean()
 
 

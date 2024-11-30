@@ -127,7 +127,7 @@ class OobleckDecoder(nn.Module):
     def __init__(self, 
                  out_channels=1, 
                  channels=128, 
-                 latent_dim=64, 
+                 latent_dim=128, 
                  c_mults = [1, 2, 4, 8, 16], 
                  strides = [2, 4, 8, 8, 8],):
                
@@ -214,7 +214,7 @@ class AudioAutoencoder(nn.Module):
         downsampling_ratio=2048,
         sample_rate=8000,
         io_channels=1,
-        bottleneck = VAEBottleneck(),
+        bottleneck = AEBottleneck(),
         in_channels = 1,
         out_channels = 1,
     ):
@@ -380,3 +380,51 @@ def create_diffAE_from_config(config: Dict[str, Any]):
         pretransform=pretransform
     )
 '''
+
+
+class AutoEncoderWrapper(nn.Module):
+    def __init__(
+        self,
+        autoencoder = AudioAutoencoder(),
+        autoencoder_state_path = None,
+        ):
+        super().__init__()
+        self.ae = autoencoder  
+        if (autoencoder_state_path is not None):
+            if torch.cuda.is_available():
+                print("Loaded Pretrained autoencoder. (CUDA)")
+                self.ae.state_dict(torch.load(autoencoder_state_path))
+            else:
+                print("Loaded Pretrained autoencoder. (CPU)")
+                self.ae.state_dict(torch.load(autoencoder_state_path,map_location='cpu'))
+        else:
+            print("Pretrained autoencoder not found. It is recommended to use pretrained autoencoder.")
+            
+    @torch.no_grad()
+    def get_latents_shape(self, example):
+        bs, chn, seq = self.ae.encode(example).shape
+        return bs, chn, seq # for 1, 16384, we have 1, 64, 4
+    
+    
+    def encode(self, x):
+        return self.ae.encode(x)
+    
+    def decode(self, x):
+        return self.ae.decode(x)
+    
+    
+    def freeze_encoder(self):
+        for layer in self.ae.encoder.parameters():
+            layer.requires_grad = False
+        
+    def freeze_decoder(self):
+        for layer in self.ae.decoder.parameters():
+            layer.requires_grad = False
+        
+    def unfreeze_encoder(self):
+        for layer in self.ae.encoder.parameters():
+            layer.requires_grad = True
+        
+    def unfreeze_decoder(self):
+        for layer in self.ae.decoder.parameters():
+            layer.requires_grad = True

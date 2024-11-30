@@ -1,0 +1,39 @@
+{
+    "os": "macOS-14.1-arm64-arm-64bit",
+    "python": "3.11.7",
+    "heartbeatAt": "2024-11-30T07:42:39.746161",
+    "startedAt": "2024-11-30T07:42:39.655320",
+    "docker": null,
+    "cuda": null,
+    "args": [
+        "configs/config.yml"
+    ],
+    "state": "running",
+    "program": "/Users/axion66/coding/Re-Beethoven/src/train_diffusion.py",
+    "codePathLocal": "train_diffusion.py",
+    "codePath": "src/train_diffusion.py",
+    "git": {
+        "remote": "https://github.com/axion66/Re-Beethoven.git",
+        "commit": "102abe1c6cc792a6dd7dcbaa535f3b3298a08e6a"
+    },
+    "email": "ssongjinseob@gmail.com",
+    "root": "/Users/axion66/coding/Re-Beethoven",
+    "host": "axion66s-MacBook-Pro.local",
+    "username": "axion66",
+    "executable": "/Users/axion66/anaconda3/bin/python3",
+    "cpu_count": 8,
+    "cpu_count_logical": 8,
+    "disk": {
+        "/": {
+            "total": 926.3517189025879,
+            "used": 343.66661071777344
+        }
+    },
+    "gpuapple": {
+        "type": "arm",
+        "vendor": "Apple"
+    },
+    "memory": {
+        "total": 16.0
+    }
+}

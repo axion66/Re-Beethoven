@@ -74,6 +74,13 @@ class L1Loss(Loss):
         self.loss = nn.L1Loss(reduction=distance)
     def forward(self,x,y):
         return self.loss(y, x)
+    
+class MSELoss(Loss):
+    def __init__(self,distance='mean'):
+        super().__init__()
+        self.loss = nn.MSELoss(reduction=distance)
+    def forward(self,x,y):
+        return self.loss(y, x)
 
 class SpectralConvergenceLoss(Loss):
     """Spectral convergence loss module.
@@ -461,6 +468,7 @@ def get_hinge_losses(score_real, score_fake):
     gen_loss = -score_fake.mean()
     dis_loss = torch.relu(1 - score_real).mean() + torch.relu(1 + score_fake).mean()
     return dis_loss, gen_loss
+
 class EncodecDiscriminator(nn.Module):
 
     def __init__(self, *args, **kwargs):
