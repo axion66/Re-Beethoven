@@ -122,7 +122,7 @@ class Trainer:
         LOG_DIR = self.FILE_CFG['log_dir']
         os.makedirs(LOG_DIR, exist_ok=True)
 
-
+        step = 0
         for epoch in range(self.MODEL_CFG['epoch']):
             
             EPOCH_LOSS = []
@@ -143,45 +143,42 @@ class Trainer:
                 # Timestamp Loss, LR
                 EPOCH_LOSS.append(loss.item())
                 wandb.log({"timestamp_loss": loss.item(), "lr": self.optim.param_groups[0]['lr']})
-
+                step += 1
+                if step % self.MODEL_CFG['evaluation_cycle'] == 0:
+                    self.net.eval()
+                    EVAL_LOSS = []
+                    with torch.no_grad():
+                        for x in self.test_loader:
+                            x = x[0].to(self.MODEL_CFG['device']) # list to TEnsor
+                            loss = self.denoiser.loss_fn(x)
+                            EVAL_LOSS.append(loss.item())
+                
+                    avg_eval_loss = sum(EVAL_LOSS) / len(EVAL_LOSS)
+                    wandb.log({"eval_loss": avg_eval_loss})
+                    print(f"Evaluation Loss: {avg_eval_loss:.4f}")
+    
+                    if avg_eval_loss < self.best_eval_loss:
+                        self.best_eval_loss = avg_eval_loss
+                        torch.save(self.denoiser.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
+    
+                    STORE_SAMPLE_DIR = os.path.join(LOG_DIR, f"samples_epoch_{epoch+1}")
+                    for idx in range(self.MODEL_CFG['num_samples']):
+                        self.generate_samples(
+                            num_samples=1,#self.MODEL_CFG['num_samples'],
+                            num_steps=self.MODEL_CFG['sampling_steps'][idx],
+                            output_dir=STORE_SAMPLE_DIR,
+                            idx=idx
+                        )
+    
+                    for i in range(self.MODEL_CFG['num_samples']):
+                        sample_path = os.path.join(STORE_SAMPLE_DIR, f"Sample_{i}.wav")
+                        wandb.log({f"Sample {i}": wandb.Audio(sample_path, sample_rate=self.FFT_CFG['sr'])})
+                    self.net.train()
+                
             # Epoch Loss
             avg_train_loss = sum(EPOCH_LOSS) / len(EPOCH_LOSS)
             wandb.log({"train_loss": avg_train_loss})
             print(f"Epoch {epoch+1}/{EPOCH}, Average Train Loss: {avg_train_loss:.4f}")
-
-            # Evaluation & Sampling
-            if (epoch + 1) % self.MODEL_CFG['evaluation_cycle'] == 0:
-                self.net.eval()
-                EVAL_LOSS = []
-                with torch.no_grad():
-                    for x in self.test_loader:
-                        x = x[0].to(self.MODEL_CFG['device']) # list to TEnsor
-                        loss = self.denoiser.loss_fn(x)
-                        EVAL_LOSS.append(loss.item())
-            
-                avg_eval_loss = sum(EVAL_LOSS) / len(EVAL_LOSS)
-                wandb.log({"eval_loss": avg_eval_loss})
-                print(f"Evaluation Loss: {avg_eval_loss:.4f}")
-
-                if avg_eval_loss < self.best_eval_loss:
-                    self.best_eval_loss = avg_eval_loss
-                    torch.save(self.denoiser.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
-
-                STORE_SAMPLE_DIR = os.path.join(LOG_DIR, f"samples_epoch_{epoch+1}")
-                for idx in range(self.MODEL_CFG['num_samples']):
-                    self.generate_samples(
-                        num_samples=1,#self.MODEL_CFG['num_samples'],
-                        num_steps=self.MODEL_CFG['sampling_steps'][idx],
-                        output_dir=STORE_SAMPLE_DIR,
-                        idx=idx
-                    )
-
-                for i in range(self.MODEL_CFG['num_samples']):
-                    sample_path = os.path.join(STORE_SAMPLE_DIR, f"Sample_{i}.wav")
-                    wandb.log({f"Sample {i}": wandb.Audio(sample_path, sample_rate=self.FFT_CFG['sr'])})
-                self.net.train()
-
-            
 
 
 

@@ -393,13 +393,16 @@ class AutoEncoderWrapper(nn.Module):
         if (autoencoder_state_path is not None):
             if torch.cuda.is_available():
                 print("Loaded Pretrained autoencoder. (CUDA)")
-                self.ae.state_dict(torch.load(autoencoder_state_path))
+                self.ae.load_state_dict(torch.load(autoencoder_state_path))
             else:
                 print("Loaded Pretrained autoencoder. (CPU)")
-                self.ae.state_dict(torch.load(autoencoder_state_path,map_location='cpu'))
+                self.ae.load_state_dict(torch.load(autoencoder_state_path, map_location='cpu'))
         else:
             print("Pretrained autoencoder not found. It is recommended to use pretrained autoencoder.")
-            
+
+        self.freeze_encoder()
+        self.freeze_decoder()
+        
     @torch.no_grad()
     def get_latents_shape(self, example):
         bs, chn, seq = self.ae.encode(example).shape

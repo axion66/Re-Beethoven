@@ -3,7 +3,7 @@ import yaml
 import torch
 import torch.nn as nn
 from torch.optim import AdamW,Adam
-from layers.preprocess import load_mp3_files, create_overlapping_chunks_tensor
+from layers.preprocess import load_files, create_overlapping_chunks_tensor
 from torch.utils.data import TensorDataset, DataLoader
 from datetime import datetime
 import soundfile as sf  
@@ -53,14 +53,15 @@ class Trainer:
             print(f"Loaded pretrained model at {self.MODEL_CFG['pretrained_autoencoder']} | File exists: {os.path.exists(self.MODEL_CFG['pretrained_autoencoder'])}")
             self.net.load_state_dict(torch.load(self.MODEL_CFG['pretrained_autoencoder']))
             
-        if (self.MODEL_CFG['freeze_encoder']):
+        if self.MODEL_CFG['freeze_encoder']:
             print("Encoder freezed.")
-            self.net.encoder.requires_grad_ = False
+            for layer in self.net.encoder.parameters():
+                layer.requires_grad = False
         
-        if (self.MODEL_CFG['freeze_decoder']):
+        if self.MODEL_CFG['freeze_decoder']:
             print("Decoder freezed.")
-            self.net.decoder.requires_grad_ = False
-            
+            for layer in self.net.decoder.parameters():
+                layer.requires_grad = False
         print_model_size("Autoencoder", self.net)
         
     def configure_loss(self):
@@ -70,11 +71,11 @@ class Trainer:
         self.loss = LossModule(name="AutoEncoder")
         self.loss.append("mrstft", weight_loss=0.25, module=MultiResolutionSTFTLoss(
             sample_rate=self.FFT_CFG['sr']).to(self.MODEL_CFG['device']))
-        self.loss.append("L1", weight_loss=0.1,module=L1Loss().to(self.MODEL_CFG['device']))        
+        #self.loss.append("L1", weight_loss=0.1,module=L1Loss().to(self.MODEL_CFG['device']))        
 
     
     def configure_loader(self):
-        tensors = load_mp3_files(base_folder=self.FILE_CFG['audio_folder'], config=self.FFT_CFG)
+        tensors = load_files(base_folder=self.FILE_CFG['audio_folder'], config=self.FFT_CFG)
         tensors = torch.cat(tensors, dim=-1)
 
         x = create_overlapping_chunks_tensor(sequence=tensors, config=self.FFT_CFG)
@@ -88,8 +89,8 @@ class Trainer:
 
     def configure_optimizer(self):
         #warmup_period = self.MODEL_CFG['warmup_period']
-        self.discriminator = EncodecDiscriminator().to(self.MODEL_CFG['device'])
-        self.optim_dis = AdamW(self.discriminator.parameters(), lr=self.MODEL_CFG['lr'] * 2, betas=(0.8,0.99))
+        #self.discriminator = EncodecDiscriminator().to(self.MODEL_CFG['device'])
+        #self.optim_dis = AdamW(self.discriminator.parameters(), lr=self.MODEL_CFG['lr'] * 2, betas=(0.8,0.99))
         #self.lr_schedule_dis = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim_dis, T_max=num_steps)
         #self.warmup_schedule_dis = warmup.ExponentialWarmup(self.optim_dis, warmup_period)
         
@@ -120,7 +121,7 @@ class Trainer:
         LOG_DIR = self.FILE_CFG['log_dir']
         os.makedirs(LOG_DIR, exist_ok=True)
 
-
+        step = 0
         for epoch in range(self.MODEL_CFG['epoch']):
             
             epochloss = []
@@ -131,20 +132,22 @@ class Trainer:
                 latents = self.net.encode(x)
                 decoded = self.net.decode(latents).unsqueeze(1) # batch, 1, seq
 
-                
+                '''
                 dis_loss, adv_loss, feature_matching_loss = self.discriminator.loss(x, decoded)
                 
                 if (self.loss.discriminator_step % 2 == 0):
-                    
-                    self.optim_dis.zero_grad()
-                    dis_loss.backward()
-                    self.optim_dis.step()
-                    
-                    info.update({"discriminator/dis_loss" : dis_loss})
-                else:
-                    loss, info_loss_fn = self.loss.loss_fn(x, decoded)
-                    gen_loss = loss + adv_loss + feature_matching_loss
-                    
+                    if (dis_loss < 1e+8):
+                        self.optim_dis.zero_grad()
+                        dis_loss.backward()
+                        self.optim_dis.step()
+                        
+                        info.update({"discriminator/dis_loss" : dis_loss})
+                else:'''
+                
+                loss, info_loss_fn = self.loss.loss_fn(x, decoded)
+                gen_loss = loss
+
+                if gen_loss < 1e+8:
                     self.optim_gen.zero_grad()
                     gen_loss.backward()
                     self.optim_gen.step()
@@ -152,63 +155,62 @@ class Trainer:
                     info.update(
                         {
                             **info_loss_fn,
-                            'discriminator/adv_loss': adv_loss,
-                            "discriminator/feature_matching_loss": feature_matching_loss,
                             "generator_loss": gen_loss
                         }
                     )
                     epochloss.append(gen_loss.item()) 
-                              
+                          
                 self.loss.discriminator_step += 1
                        
                 info.update({
-                    "lr/lr_dis": self.optim_dis.param_groups[0]['lr'],
                     "lr/lr_gen": self.optim_gen.param_groups[0]['lr'],
                     }
                 ) 
                
                 wandb.log(info)
-
+                step += 1
+                if step % self.MODEL_CFG['evaluation_cycle'] == 0:
+                    self.net.eval()
+                    with torch.no_grad():
+                        EVAL_LOSS = []
+                        FAKE_DIR = os.path.join(LOG_DIR, f"generated_epoch_{epoch+1}")
+                        ORIG_DIR = os.path.join(LOG_DIR, f"original_epoch_{epoch+1}")
+                        os.makedirs(FAKE_DIR, exist_ok=True)
+                        os.makedirs(ORIG_DIR, exist_ok=True)
+                        for idx, x in enumerate(self.test_loader):
+                            x = x[0].to(self.MODEL_CFG['device'])
+                            latents = self.net.encode(x)
+                            decoded = self.net.decode(latents)
+                            loss,_ = self.loss.loss_fn(x.unsqueeze(1), decoded.unsqueeze(1))
+                            
+                            self.generate_samples(decoded,output_dir=FAKE_DIR, name="fake")
+                            self.generate_samples(x,output_dir=ORIG_DIR, name="real")
+                            
+                            EVAL_LOSS.append(loss.detach().cpu().item())
+    
+                    avg_eval_loss = sum(EVAL_LOSS) / len(EVAL_LOSS)
+                    wandb.log({"eval_loss": avg_eval_loss})
+                    print(f"Evaluation Loss: {avg_eval_loss:.4f}")
+                    
+                    if avg_eval_loss < self.best_eval_loss:
+                        self.best_eval_loss = avg_eval_loss
+                        torch.save(self.net.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
+                        print(f"Best model saved at {LOG_DIR}/best_model.pth")
+                    self.net.train()
+    
+                if ((step) % 1000 == 0):
+                    for name, module in self.net.named_modules():
+                        if hasattr(module, 'weight') and module.weight.grad is not None:
+                            wandb.log({f"gradients/{name}.weight": wandb.Histogram(module.weight.grad.cpu().numpy())})
+                        if hasattr(module, 'bias') and module.bias is not None and module.bias.grad is not None:
+                            wandb.log({f"gradients/{name}.bias": wandb.Histogram(module.bias.grad.cpu().numpy())})
+    
+                
             wandb.log({"Average Generator Loss": sum(epochloss) / len(epochloss)})
             print(f"Epoch {epoch+1}/{EPOCH}, Average Generator Loss: {sum(epochloss) / len(epochloss)}")
 
 
-            if (epoch + 1) % self.MODEL_CFG['evaluation_cycle'] == 0:
-                self.net.eval()
-                with torch.no_grad():
-                    EVAL_LOSS = []
-                    FAKE_DIR = os.path.join(LOG_DIR, f"generated_epoch_{epoch+1}")
-                    ORIG_DIR = os.path.join(LOG_DIR, f"original_epoch_{epoch+1}")
-                    os.makedirs(FAKE_DIR, exist_ok=True)
-                    os.makedirs(ORIG_DIR, exist_ok=True)
-                    for idx, x in enumerate(self.test_loader):
-                        x = x[0].to(self.MODEL_CFG['device'])
-                        latents = self.net.encode(x)
-                        decoded = self.net.decode(latents)
-                        loss,_ = self.loss.loss_fn(x.unsqueeze(1), decoded.unsqueeze(1))
-                        
-                        self.generate_samples(decoded,output_dir=FAKE_DIR, name="fake")
-                        self.generate_samples(x,output_dir=ORIG_DIR, name="real")
-                        
-                        EVAL_LOSS.append(loss.detach().cpu().item())
-
-                avg_eval_loss = sum(EVAL_LOSS) / len(EVAL_LOSS)
-                wandb.log({"eval_loss": avg_eval_loss})
-                print(f"Evaluation Loss: {avg_eval_loss:.4f}")
-                
-                if avg_eval_loss < self.best_eval_loss:
-                    self.best_eval_loss = avg_eval_loss
-                    torch.save(self.net.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
-                    print(f"Best model saved at {LOG_DIR}/best_model.pth")
-                self.net.train()
-
-            if ((epoch) % 10 == 0):
-                for name, module in self.net.named_modules():
-                    if hasattr(module, 'weight') and module.weight.grad is not None:
-                        wandb.log({f"gradients/{name}.weight": wandb.Histogram(module.weight.grad.cpu().numpy())})
-                    if hasattr(module, 'bias') and module.bias is not None and module.bias.grad is not None:
-                        wandb.log({f"gradients/{name}.bias": wandb.Histogram(module.bias.grad.cpu().numpy())})
-
+            
 
 
     

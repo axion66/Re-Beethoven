@@ -2,7 +2,7 @@ fft:
   n_fft: 512
   win_len: 512
   hop_length: 256
-  seq_len: 16384
+  seq_len: 3145728
   overlap_ratio: 2
   cut_first: 4000
   sr: 16000
@@ -16,19 +16,19 @@ fft:
   embed_dim: 512
 model:
   epoch: 200
-  device: "cpu"
-  batch_size: 7
+  device: "cuda:0"
+  batch_size: 1
   lr: 0.00015
   warmup_period: 4000
-  num_workers: 4
-  evaluation_cycle: 10
+  num_workers: 46
+  evaluation_cycle: 1
   sampling_steps: [50, 100, 100]
-  num_samples: 5
-  pretrained_autoencoder: "../models/Nov29.pth"
+  num_samples: 6
+  pretrained_autoencoder: "../models/final3.pth"
   freeze_encoder: True
   freeze_decoder: True
 file:
-  audio_folder: "../dataset"
+  audio_folder: "../demo_dataset"
   log_dir: "../train_log/"
-  project_name: "DiffusionwithAutoencoder"
-  run_name: "1127Wed-seoul"
+  project_name: "DiT"
+  run_name: "1201-DiT"
