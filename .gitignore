@@ -5,6 +5,8 @@ models/*
 models/
 /models/
 
+/models/*
+models/
 dataset/train_data
 dataset/train_labels
 dataset_test/

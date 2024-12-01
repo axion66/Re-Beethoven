@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import math
+
+
 def exists(val):
     return val is not None
 
@@ -16,7 +18,8 @@ class PositionwiseFeedForward(nn.Sequential):
     def __init__(self, dims: int, activation=nn.SiLU(),rate: int = 4, dropout: float = 0.2):
         super().__init__(
             Linear(dims,dims * rate),
-            activation,
+            nn.SiLU(),  
+            # realized SnakeBeta activation won't work due to dimension difference. Better to hard code.
             nn.Dropout(dropout),
             Linear(dims * rate, dims)
         )
@@ -32,7 +35,6 @@ class FourierFeatures(nn.Module):
         return torch.cat([f.cos(), f.sin()], dim=-1)
 
 
-\
 class Transpose(nn.Module):
     def __init__(self, dim1, dim2):
         super(Transpose, self).__init__()

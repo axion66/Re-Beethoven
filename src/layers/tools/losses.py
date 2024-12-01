@@ -2,30 +2,99 @@
 import torch
 import torch.nn as nn
 from typing import List, Any
-
+import numpy as np
 # https://github.com/csteinmetz1/auraloss/tree/main
 # paper suggests L1 Loss & MR is the best performing one..
+import scipy
+class Loss(nn.Module):
+    def __init__(self,*args,**kwargs):
+        super().__init__()
+        
+    
 
-class RawL1Loss(nn.Module):
+def get_window(win_type: str, win_length: int):
+    """Return a window function.
+
+    Args:
+        win_type (str): Window type. Can either be one of the window function provided in PyTorch
+            ['hann_window', 'bartlett_window', 'blackman_window', 'hamming_window', 'kaiser_window']
+            or any of the windows provided by [SciPy](https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.windows.get_window.html).
+        win_length (int): Window length
+
+    Returns:
+        win: The window as a 1D torch tensor
+    """
+
+    try:
+        win = getattr(torch, win_type)(win_length)
+    except:
+        win = torch.from_numpy(scipy.signal.windows.get_window(win_type, win_length))
+
+    return win
+
+class LossModule:
+    def __init__(self, name):
+        self.name = name
+        self.losses : list = []
+        self.discriminator_step = 0
+        
+    def append(self, name, weight_loss, module: Loss):
+        self.losses.append(
+            {
+                "name": name,
+                "weight": weight_loss,
+                "module": module,
+            }
+            
+        )
+        
+    def loss_fn(self, x, y):
+
+        total_loss = 0.0
+        info = {}
+        
+        for loss_module in self.losses:
+            
+            name = loss_module['name']
+            weight = loss_module['weight']
+            
+  
+            l = loss_module['module'](x, y)
+            assert not isinstance(l, tuple)
+            l *= weight
+            total_loss += l
+            info.update({name : l})
+        
+        
+        return total_loss, info
+    
+class L1Loss(Loss):
     def __init__(self,distance='mean'):
         super().__init__()
         self.loss = nn.L1Loss(reduction=distance)
     def forward(self,x,y):
-        return self.loss(x,y)
+        return self.loss(y, x)
+    
+class MSELoss(Loss):
+    def __init__(self,distance='mean'):
+        super().__init__()
+        self.loss = nn.MSELoss(reduction=distance)
+    def forward(self,x,y):
+        return self.loss(y, x)
 
-class SpectralConvergenceLoss(nn.Module):
+class SpectralConvergenceLoss(Loss):
     """Spectral convergence loss module.
 
     See [Arik et al., 2018](https://arxiv.org/abs/1808.06719).
     """
 
     def __init__(self):
-        super(SpectralConvergenceLoss, self).__init__()
+        super().__init__()
 
     def forward(self, x_mag, y_mag):
         return (torch.norm(y_mag - x_mag, p="fro", dim=[-1, -2]) / torch.norm(y_mag, p="fro", dim=[-1, -2])).mean()
 
-class STFTMagnitudeLoss(nn.Module):
+class STFTMagnitudeLoss(Loss):
     """STFT magnitude loss module.
 
     See [Arik et al., 2018](https://arxiv.org/abs/1808.06719)
@@ -67,7 +136,16 @@ class STFTMagnitudeLoss(nn.Module):
             y_mag = torch.log(self.log_fac * y_mag + self.log_eps)
         return self.distance(x_mag, y_mag)
 
-class STFTLoss(nn.Module):
+
+def apply_reduction(losses, reduction="none"):
+    """Apply reduction to collection of losses."""
+    if reduction == "mean":
+        losses = losses.mean()
+    elif reduction == "sum":
+        losses = losses.sum()
+    return losses
+
+class STFTLoss(torch.nn.Module):
     """STFT loss module.
 
     See [Yamamoto et al. 2019](https://arxiv.org/abs/1904.04472).
@@ -89,6 +167,7 @@ class STFTLoss(nn.Module):
             ['mel', 'chroma']
             Default: None
         n_bins (int, optional): Number of scaling frequency bins. Default: None.
+        perceptual_weighting (bool, optional): Apply perceptual A-weighting (Sample rate must be supplied). Default: False
         scale_invariance (bool, optional): Perform an optimal scaling of the target. Default: False
         eps (float, optional): Small epsilon value for stablity. Default: 1e-8
         output (str, optional): Format of the loss returned.
@@ -115,13 +194,15 @@ class STFTLoss(nn.Module):
         fft_size: int = 1024,
         hop_size: int = 256,
         win_length: int = 1024,
+        window: str = "hann_window",
         w_sc: float = 1.0,
         w_log_mag: float = 1.0,
         w_lin_mag: float = 0.0,
         w_phs: float = 0.0,
         sample_rate: float = None,
-        scale: str = "chroma",
+        scale: str = None,
         n_bins: int = None,
+        perceptual_weighting: bool = False,
         scale_invariance: bool = False,
         eps: float = 1e-8,
         output: str = "loss",
@@ -134,7 +215,7 @@ class STFTLoss(nn.Module):
         self.fft_size = fft_size
         self.hop_size = hop_size
         self.win_length = win_length
-        self.window = torch.hann_window(win_length)
+        self.window = get_window(window, win_length)
         self.w_sc = w_sc
         self.w_log_mag = w_log_mag
         self.w_lin_mag = w_lin_mag
@@ -142,6 +223,7 @@ class STFTLoss(nn.Module):
         self.sample_rate = sample_rate
         self.scale = scale
         self.n_bins = n_bins
+        self.perceptual_weighting = perceptual_weighting
         self.scale_invariance = scale_invariance
         self.eps = eps
         self.output = output
@@ -196,7 +278,13 @@ class STFTLoss(nn.Module):
         if scale is not None and device is not None:
             self.fb = self.fb.to(self.device)  # move filterbank to device
 
-    
+        if self.perceptual_weighting:
+            if sample_rate is None:
+                raise ValueError(
+                    f"`sample_rate` must be supplied when `perceptual_weighting = True`."
+                )
+            self.prefilter = FIRFilter(filter_type="aw", fs=sample_rate)
+
     def stft(self, x):
         """Perform STFT.
         Args:
@@ -229,6 +317,19 @@ class STFTLoss(nn.Module):
     def forward(self, input: torch.Tensor, target: torch.Tensor):
         bs, chs, seq_len = input.size()
 
+        if self.perceptual_weighting:  # apply optional A-weighting via FIR filter
+            # since FIRFilter only support mono audio we will move channels to batch dim
+            input = input.view(bs * chs, 1, -1)
+            target = target.view(bs * chs, 1, -1)
+
+            # now apply the filter to both
+            self.prefilter.to(input.device)
+            input, target = self.prefilter(input, target)
+
+            # now move the channels back
+            input = input.view(bs, chs, -1)
+            target = target.view(bs, chs, -1)
+
         # compute the magnitude and phase spectra of input and target
         self.window = self.window.to(input.device)
 
@@ -260,14 +361,16 @@ class STFTLoss(nn.Module):
             + (self.w_phs * phs_loss)
         )
 
-        loss = loss.mean()
+        loss = apply_reduction(loss, reduction=self.reduction)
 
         if self.output == "loss":
             return loss
         elif self.output == "full":
             return loss, sc_mag_loss, log_mag_loss, lin_mag_loss, phs_loss
 
-class MultiResolutionSTFTLoss(nn.Module):
+
+
+class MultiResolutionSTFTLoss(torch.nn.Module):
     """Multi resolution STFT loss module.
 
     See [Yamamoto et al., 2019](https://arxiv.org/abs/1910.11480)
@@ -286,22 +389,17 @@ class MultiResolutionSTFTLoss(nn.Module):
         sample_rate (int, optional): Sample rate. Required when scale = 'mel'. Default: None
         scale (str, optional): Optional frequency scaling method, options include:
             ['mel', 'chroma']
-            Default: 'chroma'
+            Default: None
         n_bins (int, optional): Number of mel frequency bins. Required when scale = 'mel'. Default: None.
         scale_invariance (bool, optional): Perform an optimal scaling of the target. Default: False
     """
-    '''
-    "fft_sizes": [2048, 1024, 512, 256, 128, 64, 32],
-                    "hop_sizes": [512, 256, 128, 64, 32, 16, 8],
-                    "win_lengths": [2048, 1024, 512, 256, 128, 64, 32],
-                    "perceptual_weighting": true
-    '''
 
     def __init__(
         self,
-        fft_sizes: List[int] = [2048, 1024, 512, 256, 128, 64, 32],
-        hop_sizes: List[int] = [512, 256, 128, 64, 32, 16, 8],
-        win_lengths: List[int] = [2048, 1024, 512, 256, 128, 64, 32],
+        fft_sizes: List[int] = [1024, 2048, 512],
+        hop_sizes: List[int] = [120, 240, 50],
+        win_lengths: List[int] = [600, 1200, 240],
+        window: str = "hann_window",
         w_sc: float = 1.0,
         w_log_mag: float = 1.0,
         w_lin_mag: float = 0.0,
@@ -309,6 +407,7 @@ class MultiResolutionSTFTLoss(nn.Module):
         sample_rate: float = None,
         scale: str = None,
         n_bins: int = None,
+        perceptual_weighting: bool = False,
         scale_invariance: bool = False,
         **kwargs,
     ):
@@ -325,6 +424,7 @@ class MultiResolutionSTFTLoss(nn.Module):
                     fs,
                     ss,
                     wl,
+                    window,
                     w_sc,
                     w_log_mag,
                     w_lin_mag,
@@ -332,13 +432,13 @@ class MultiResolutionSTFTLoss(nn.Module):
                     sample_rate,
                     scale,
                     n_bins,
+                    perceptual_weighting,
                     scale_invariance,
                     **kwargs,
                 )
             ]
 
     def forward(self, x, y):
-        #https://static1.squarespace.com/static/5554d97de4b0ee3b50a3ad52/t/5fb1e9031c7089551a30c2e4/1605495044128/DMRN15__auraloss__Audio_focused_loss_functions_in_PyTorch.pdf
         mrstft_loss = 0.0
         sc_mag_loss, log_mag_loss, lin_mag_loss, phs_loss = [], [], [], []
 
@@ -361,12 +461,71 @@ class MultiResolutionSTFTLoss(nn.Module):
             return mrstft_loss, sc_mag_loss, log_mag_loss, lin_mag_loss, phs_loss
 
 
+
+
+
 def get_hinge_losses(score_real, score_fake):
     gen_loss = -score_fake.mean()
     dis_loss = torch.relu(1 - score_real).mean() + torch.relu(1 + score_fake).mean()
     return dis_loss, gen_loss
 
 class EncodecDiscriminator(nn.Module):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+        from encodec.msstftd import MultiScaleSTFTDiscriminator
+
+        self.discriminators = MultiScaleSTFTDiscriminator(filters=64,*args, **kwargs)
+
+    def forward(self, x):
+        logits, features = self.discriminators(x)
+        return logits, features
+
+    def discriminator_hinge_loss(self, score_real, score_fake):
+        dis_loss = torch.relu(1 - score_real).mean() + torch.relu(1 + score_fake).mean()
+        return dis_loss
+
+    def generator_hinge_loss(self, score_fake):
+        gen_loss = -score_fake.mean()
+        return gen_loss
+
+    def loss(self, x, y):
+        feature_matching_distance = 0.
+        logits_true, feature_true = self.forward(x)
+        logits_fake, feature_fake = self.forward(y)
+
+        dis_loss = torch.tensor(0., device=x.device)
+        adv_loss = torch.tensor(0., device=x.device)
+
+        # Detach y for the discriminator loss computation
+        logits_fake_detached, _ = self.forward(y.detach())
+
+        for i, (scale_true, scale_fake) in enumerate(zip(feature_true, feature_fake)):
+
+            feature_matching_distance = feature_matching_distance + sum(
+                map(
+                    lambda x, y: abs(x - y).mean(),
+                    scale_true,
+                    scale_fake,
+                )) / len(scale_true)
+
+            # Discriminator loss should use detached logits
+            _dis = self.discriminator_hinge_loss(
+                logits_true[i],
+                logits_fake_detached[i],
+            )
+            dis_loss = dis_loss + _dis
+
+            # Adversarial loss should use non-detached logits
+            _adv = self.generator_hinge_loss(
+                logits_fake[i],
+            )
+            adv_loss = adv_loss + _adv
+
+        return dis_loss, 0.1 * adv_loss, 5 * feature_matching_distance
+'''
+class EncodecDiscriminator(Loss):
     def __init__(self):
         super().__init__()
 
@@ -377,14 +536,19 @@ class EncodecDiscriminator(nn.Module):
                                                           win_lengths=[2048, 1024, 512, 256, 128],
                                                           )
 
-    def forward(self, x):
+    def _forward(self, x):
         logits, features = self.discriminators(x)
         return logits, features
 
-    def loss(self, x, y):
+    def get_hinge_losses(self, score_real, score_fake):
+        gen_loss = -score_fake.mean() # why not (1 - score_Fake)?
+        dis_loss = torch.relu(1 - score_real).mean() + torch.relu(1 + score_fake).mean()
+        return dis_loss, gen_loss
+    
+    def forward(self, y, x): # fake for y, true for x
         feature_matching_distance = 0.
-        logits_true, feature_true = self.forward(x)
-        logits_fake, feature_fake = self.forward(y)
+        logits_true, feature_true = self._forward(x)
+        logits_fake, feature_fake = self._forward(y)
 
         dis_loss = torch.tensor(0.)
         adv_loss = torch.tensor(0.)
@@ -398,7 +562,7 @@ class EncodecDiscriminator(nn.Module):
                     scale_fake,
                 )) / len(scale_true)
 
-            _dis, _adv = get_hinge_losses(
+            _dis, _adv = self.get_hinge_losses(
                 logits_true[i],
                 logits_fake[i],
             )
@@ -408,5 +572,102 @@ class EncodecDiscriminator(nn.Module):
 
         return 1 * dis_loss, 0.1 * adv_loss, 5 * feature_matching_distance
         # use dis_loss only for discriminator, and use adv_loss and feature_matching_distance for generator.
+'''
 
+
+
+class FIRFilter(torch.nn.Module):
+    """FIR pre-emphasis filtering module.
+
+    Args:
+        filter_type (str): Shape of the desired FIR filter ("hp", "fd", "aw"). Default: "hp"
+        coef (float): Coefficient value for the filter tap (only applicable for "hp" and "fd"). Default: 0.85
+        ntaps (int): Number of FIR filter taps for constructing A-weighting filters. Default: 101
+        plot (bool): Plot the magnitude respond of the filter. Default: False
+
+    Based upon the perceptual loss pre-empahsis filters proposed by
+    [Wright & Välimäki, 2019](https://arxiv.org/abs/1911.08922).
+
+    A-weighting filter - "aw"
+    First-order highpass - "hp"
+    Folded differentiator - "fd"
+
+    Note that the default coefficeint value of 0.85 is optimized for
+    a sampling rate of 44.1 kHz, considering adjusting this value at differnt sampling rates.
+    """
+
+    def __init__(self, filter_type="hp", coef=0.85, fs=44100, ntaps=101, plot=False):
+        """Initilize FIR pre-emphasis filtering module."""
+        super(FIRFilter, self).__init__()
+        self.filter_type = filter_type
+        self.coef = coef
+        self.fs = fs
+        self.ntaps = ntaps
+        self.plot = plot
+
+        import scipy.signal
+
+        if ntaps % 2 == 0:
+            raise ValueError(f"ntaps must be odd (ntaps={ntaps}).")
+
+        if filter_type == "hp":
+            self.fir = torch.nn.Conv1d(1, 1, kernel_size=3, bias=False, padding=1)
+            self.fir.weight.requires_grad = False
+            self.fir.weight.data = torch.tensor([1, -coef, 0]).view(1, 1, -1)
+        elif filter_type == "fd":
+            self.fir = torch.nn.Conv1d(1, 1, kernel_size=3, bias=False, padding=1)
+            self.fir.weight.requires_grad = False
+            self.fir.weight.data = torch.tensor([1, 0, -coef]).view(1, 1, -1)
+        elif filter_type == "aw":
+            # Definition of analog A-weighting filter according to IEC/CD 1672.
+            f1 = 20.598997
+            f2 = 107.65265
+            f3 = 737.86223
+            f4 = 12194.217
+            A1000 = 1.9997
+
+            NUMs = [(2 * np.pi * f4) ** 2 * (10 ** (A1000 / 20)), 0, 0, 0, 0]
+            DENs = np.polymul(
+                [1, 4 * np.pi * f4, (2 * np.pi * f4) ** 2],
+                [1, 4 * np.pi * f1, (2 * np.pi * f1) ** 2],
+            )
+            DENs = np.polymul(
+                np.polymul(DENs, [1, 2 * np.pi * f3]), [1, 2 * np.pi * f2]
+            )
+
+            # convert analog filter to digital filter
+            b, a = scipy.signal.bilinear(NUMs, DENs, fs=fs)
+
+            # compute the digital filter frequency response
+            w_iir, h_iir = scipy.signal.freqz(b, a, worN=512, fs=fs)
+
+            # then we fit to 101 tap FIR filter with least squares
+            taps = scipy.signal.firls(ntaps, w_iir, abs(h_iir), fs=fs)
+
+            # now implement this digital FIR filter as a Conv1d layer
+            self.fir = torch.nn.Conv1d(
+                1, 1, kernel_size=ntaps, bias=False, padding=ntaps // 2
+            )
+            self.fir.weight.requires_grad = False
+            self.fir.weight.data = torch.tensor(taps.astype("float32")).view(1, 1, -1)
+
+            if plot:
+                from .plotting import compare_filters
+                compare_filters(b, a, taps, fs=fs)
+
+    def forward(self, input, target):
+        """Calculate forward propagation.
+        Args:
+            input (Tensor): Predicted signal (B, #channels, #samples).
+            target (Tensor): Groundtruth signal (B, #channels, #samples).
+        Returns:
+            Tensor: Filtered signal.
+        """
+        input = torch.nn.functional.conv1d(
+            input, self.fir.weight.data, padding=self.ntaps // 2
+        )
+        target = torch.nn.functional.conv1d(
+            target, self.fir.weight.data, padding=self.ntaps // 2
+        )
+        return input, target
 

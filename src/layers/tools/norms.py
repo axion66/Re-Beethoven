@@ -8,6 +8,7 @@ class LayerNorm(nn.Module):
         self.ln = nn.LayerNorm(dim,eps=1e-7)
 
     def forward(self,x):
+        #batch, seq, dim = x.shape
         return self.ln(x)
     
 class RMSNorm(nn.Module):
@@ -36,6 +37,7 @@ class RMSNorm(nn.Module):
             self.register_parameter("offset", self.offset)
 
     def forward(self, x):
+        #batch, seq, dim = x.shape
         if self.p < 0. or self.p > 1.:
             norm_x = x.norm(2, dim=-1, keepdim=True)
             d_x = self.d

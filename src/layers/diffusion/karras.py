@@ -16,7 +16,7 @@ class Denoiser(nn.Module):
         model: nn.Module,
         sigma_data: float=0.5,  # data distribution standard deviation
         sigma_min=0.002,
-        sigma_max=1, # paper suggests 80, but I will go with 3
+        sigma_max=80, # paper suggests 80, but I will go with 3
         rho: float = 7.0, # for image, set it 7
         s_churn: float = 40.0, # controls stochasticity(SDE)  0 for deterministic(ODE)
         s_tmin: float = 0.05, # I need to find with grid search, but who wants to do that..
@@ -29,8 +29,7 @@ class Denoiser(nn.Module):
         self.device = device
         self.model = model
         self.sigma_data = sigma_data
-        self.sigma_noise = lambda num_samples: (torch.randn((num_samples,1),device=device) * 1.15 - 1.2).exp()
-        #torch.normal(-1.2,1.2,size=(num_samples,),device=device).exp()
+        self.sigma_noise = lambda num_samples: (torch.randn((num_samples,1),device=device) * 1.2 - 1.2).exp()
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max # Too high.
         self.rho = rho
@@ -85,13 +84,12 @@ class Denoiser(nn.Module):
         b, device = x.shape[0], x.device
 
         # std transform
-        x_mean,x_std = x.mean(dim=-1,keepdim=True),x.std(dim=-1,keepdim=True)
+        x_mean, x_std = x.mean(dim=-1,keepdim=True),x.std(dim=-1,keepdim=True)
         x = (x - x_mean) * self.sigma_data / x_std
             
         # noise
         #mask = torch.rand_like(x) < 0.95  #70 will be noise, while other 30 will be unnoised.
         sigmas = self.sigma_noise(num_samples=b)
-        noise = torch.randn_like(x) * sigmas
         x_noised = x + (torch.randn_like(x) * sigmas) # randn_like * sigmas == noise
 
 
@@ -100,7 +98,6 @@ class Denoiser(nn.Module):
         x = (x - c_skip * x_noised) / c_out # instead of transforming the x_denoised, we transform the original x.
 
         loss = self._weighting_snr(sigmas) * ((x_denoised - x)**2)
-        #print(f"weight: {self._weighting_snr(sigmas)} \n loss: {loss}, \n w/o weight: {loss / self._weighting_snr(sigmas)}")
         return loss.reshape(-1).mean()
 
 

@@ -7,12 +7,17 @@ from layers.tools.utils import *
 from layers.tools.activations import *
 from layers.tools.norms import *
 from abc import abstractmethod
+from einops import rearrange
+from einops.layers.torch import Rearrange
+
 try:
     from flash_attn import flash_attn_func
     FLASH_ON = True
 except:
     print("Flash attention not supported. try revising the code")
     FLASH_ON = False
+    
+    
 
 class TimestepBlock(nn.Module):
     """
@@ -25,6 +30,7 @@ class TimestepBlock(nn.Module):
         Apply the module to `x` given `emb` timestep embeddings.
         """
 
+
 class TransformerBlock(TimestepBlock):
 
     def __init__(
@@ -32,9 +38,7 @@ class TransformerBlock(TimestepBlock):
         embed_dim,
         depth,
         num_heads,
-        sigma_dim=256,
         norm_fn=None,
-        activation_fn=None,
         p=0.1
     ):
         super().__init__()
@@ -44,32 +48,84 @@ class TransformerBlock(TimestepBlock):
         self.num_heads = num_heads
 
 
-        self.ln1 = norm_fn(embed_dim) if exists(norm_fn) else LayerNorm(embed_dim)
-        self.ln2 = norm_fn(embed_dim) if exists(norm_fn) else LayerNorm(embed_dim)
+        self.norm_1 = norm_fn(embed_dim) if exists(norm_fn) else LayerNorm(embed_dim)
+        self.norm_2 = norm_fn(embed_dim) if exists(norm_fn) else LayerNorm(embed_dim)
 
-        self.attn = DiffMHAFlash(embed_dim=embed_dim, 
-                                       depth=depth,
-                                       num_heads=num_heads,
-                                       sigma_dim=sigma_dim)
-        self.ff = PositionwiseFeedForward(dims=embed_dim,
-                                          activation=activation_fn if exists(activation_fn) else nn.SiLU(),
-                                          rate=4,
-                                          dropout=p
-                                          )
+        self.attn = DifferentialAttention(
+            embed_dim=embed_dim, 
+            depth=depth,
+            num_heads=num_heads     
+        )
+        
+        self.ff = nn.Sequential(
+            nn.Linear(embed_dim,embed_dim*4),
+            Rearrange('b l c -> b c l'),
+            SnakeBeta(in_features=embed_dim*4),
+            Rearrange('b c l -> b l c'),
+            nn.Linear(embed_dim*4,embed_dim)
+        )
+        
+        self.set_adaLN(embed_dim)  
+        
+    def set_adaLN(self, embed_dim):
+        #   AdaLN-zero
+        self.gamma_1 = nn.Linear(embed_dim, embed_dim, bias=True)
+        self.beta_1 = nn.Linear(embed_dim, embed_dim, bias=True)
+        self.gamma_2 = nn.Linear(embed_dim, embed_dim, bias=True)
+        self.beta_2 = nn.Linear(embed_dim, embed_dim, bias=True)
+        self.scale_1 = nn.Linear(embed_dim, embed_dim, bias=True)
+        self.scale_2 = nn.Linear(embed_dim, embed_dim, bias=True)
 
-    def forward(self, x,emb):
+        nn.init.zeros_(self.gamma_1.weight)
+        nn.init.zeros_(self.beta_1.weight)
+        nn.init.zeros_(self.gamma_1.bias)
+        nn.init.zeros_(self.beta_1.bias)  
+
+        nn.init.zeros_(self.gamma_2.weight)
+        nn.init.zeros_(self.beta_2.weight)
+        nn.init.zeros_(self.gamma_2.bias)
+        nn.init.zeros_(self.beta_2.bias)  
+
+        nn.init.zeros_(self.scale_1.weight)
+        nn.init.zeros_(self.scale_2.weight)
+        nn.init.zeros_(self.scale_1.bias)
+        nn.init.zeros_(self.scale_2.bias)
+        
+    def forward(self, x, emb):
         '''
         Get x: [batch,seq,embed_dim]
-        Get sigmas: [batch,head_dim]
+        Get sigmas: [batch, embed_dim]
+        
+        
+            Pre Normalization, but no Post Normalization being applied.
         '''
-
-        x = self.ln1(self.attn(x,emb) + x)
-        x = self.ln2(self.ff(x) + x)
-
+        # UPDATE Nov 24: Use adaLN-zero instead of adding sigmas.
+        scale_msa = self.gamma_1(emb).unsqueeze(1)
+        shift_msa = self.beta_1(emb).unsqueeze(1)
+        scale_mlp = self.gamma_2(emb).unsqueeze(1)
+        shift_mlp = self.beta_2(emb).unsqueeze(1)
+        gate_msa = self.scale_1(emb).unsqueeze(1)
+        gate_mlp = self.scale_2(emb).unsqueeze(1)
+        
+        res = x
+        x = self.norm_1(x)
+        x = x * (1 + scale_msa) + shift_msa
+        x = self.attn(x)
+        x = x * torch.sigmoid(1 - gate_msa) # not original adaLN-zero, but from stable audio paper.
+        x = x + res
+        
+        res = x
+        x = self.norm_2(x)
+        x = x * (1 + scale_mlp) + shift_mlp
+        x = self.ff(x)
+        x = x * torch.sigmoid(1 - gate_mlp)
+        x = x + res  
+          
         return x
 
 
-class DiffMHAFlash(nn.Module):
+
+class DifferentialAttention(nn.Module):
     # https://github.com/microsoft/unilm/blob/master/Diff-Transformer/multihead_flashdiff_1.py
     # Differential Attention for precise attention score
 
@@ -79,7 +135,7 @@ class DiffMHAFlash(nn.Module):
         embed_dim, # freq_bins for orig
         depth, # layer num. [1 to N layer]
         num_heads, # best for 2?, as one can focus on low_freq and one can focus on high freq (like RoPE)
-        sigma_dim
+        dim_out=None    # Optional dim_out. By default, it's same as embed_dim
     ):
         super().__init__()
         self.embed_dim = embed_dim
@@ -87,7 +143,7 @@ class DiffMHAFlash(nn.Module):
         self.head_dim = embed_dim // num_heads // 2
         
         self.qkv = Linear(embed_dim, embed_dim * 3, bias=False)
-        self.out = Linear(embed_dim, embed_dim, bias=False)
+        self.out = Linear(embed_dim, dim_out if dim_out is not None else embed_dim, bias=False)
         self.reset_lambda(depth)
         
         self.ln = RMSNorm(2 * self.head_dim, eps=1e-8,bias=True)
@@ -96,11 +152,9 @@ class DiffMHAFlash(nn.Module):
                                       seq_before_head_dim=True,
                                       freqs_for='lang', 
                                       interpolate_factor=1,
-                                      cache_if_possible=False, 
                                       use_xpos=False)
 
-        self.sigma_rotate = Linear(sigma_dim,self.head_dim,bias=False)
-    def reset_lambda(self,depth):
+    def reset_lambda(self, depth):
         self.lambda_init = 0.8 - 0.6 * math.exp(-0.3 * depth)
         self.lambda_q1 = nn.Parameter(torch.zeros(self.head_dim, dtype=torch.float32).normal_(mean=0,std=0.1))
         self.lambda_k1 = nn.Parameter(torch.zeros(self.head_dim, dtype=torch.float32).normal_(mean=0,std=0.1))
@@ -115,70 +169,54 @@ class DiffMHAFlash(nn.Module):
     
     def forward(
         self,
-        x,
-        sigmas
-    ):  
+        x
+        ):   
+        # NOV 24: remove adding sigmas, 
+        # but rather use adaLN-zero in transformer level.
         b, seq_len, embed_dim = x.size()
         assert embed_dim == self.embed_dim
-        # QKV Split
 
-        sigmas = self.sigma_rotate(sigmas)
         q,k,v = torch.chunk(self.qkv(x),dim=-1,chunks=3)
         q = q.view(b, seq_len, 2 * self.num_heads, self.head_dim)   # batch, seq_len, 2 * n, h
         k = k.view(b, seq_len, 2 * self.num_heads, self.head_dim)   # batch, seq_len, 2 * n, h
-        v = v.view(b, seq_len, self.num_heads, 2, self.head_dim)   # batch, seq_len, n,  2 * h
+        v = v.view(b, seq_len, self.num_heads, 2, self.head_dim)    # batch, seq_len, n,  2 * h
         
-        # Apply RoPE            - (Think This's best option for positional embedding)
         q = self.rotary.rotate_queries_or_keys(q)
         k = self.rotary.rotate_queries_or_keys(k)
 
-        # Reshape Q, K, Sigmas
         q = q.reshape(b, seq_len, self.num_heads, 2, self.head_dim)
         k = k.reshape(b, seq_len, self.num_heads, 2, self.head_dim)
+        
+        if FLASH_ON:
+            q = q.to(torch.float16)
+            k = k.to(torch.float16)
+            v = v.to(torch.float16)
+            
         q1, q2 = q[:, :, :, 0], q[:, :, :, 1] 
         k1, k2 = k[:, :, :, 0], k[:, :, :, 1]
         v1, v2 = v[:, :, :, 0], v[:, :, :, 1]
-        sigmas = sigmas.unsqueeze(1).unsqueeze(1)   # batch,1,1,head_dim
-
-        q2 =  q2 + sigmas #somehow in-place not wokring as I used torch.view (on top)
-        k2 =  k2 + sigmas
-        #v2 =  v2 + sigmas
-        # Differential Attention
-        if FLASH_ON:
-            # Convert inputs to float16
-            q1_fp16 = q1.to(dtype=torch.float16)
-            k1_fp16 = k1.to(dtype=torch.float16)
-            v1_fp16 = v1.to(dtype=torch.float16)
-            v2_fp16 = v2.to(dtype=torch.float16)
-            
-            q2_fp16 = q2.to(dtype=torch.float16)
-            k2_fp16 = k2.to(dtype=torch.float16)
-            
+        
+       
+        if FLASH_ON:            
             # First attention pair
-            attn11 = flash_attn_func(q1_fp16, k1_fp16, v1_fp16, causal=True).to(dtype=torch.float32)
-            attn12 = flash_attn_func(q1_fp16, k1_fp16, v2_fp16, causal=True).to(dtype=torch.float32)
-            attn1 = torch.cat([attn11, attn12], dim=-1)
+            attn11 = flash_attn_func(q1, k1, v1, causal=True)
+            attn12 = flash_attn_func(q1, k1, v2, causal=True)
             
             # Second attention pair
-            attn21 = flash_attn_func(q2_fp16, k2_fp16, v1_fp16, causal=True).to(dtype=torch.float32)
-            attn22 = flash_attn_func(q2_fp16, k2_fp16, v2_fp16, causal=True).to(dtype=torch.float32)
-            attn2 = torch.cat([attn21, attn22], dim=-1)
+            attn21 = flash_attn_func(q2, k2, v1, causal=True)
+            attn22 = flash_attn_func(q2, k2, v2, causal=True)
         else:
-            # Use regular qkv attention
             attn11 = self.qkv_attn(q1, k1, v1)
             attn12 = self.qkv_attn(q1, k1, v2)
-            attn1 = torch.cat([attn11, attn12], dim=-1)
             
             attn21 = self.qkv_attn(q2, k2, v1)
             attn22 = self.qkv_attn(q2, k2, v2)
-            attn2 = torch.cat([attn21, attn22], dim=-1)
         
-        attn = self.ln(attn1 - self.lmd(q) * attn2) * (1 - self.lambda_init)
-
-
-        # Reshape and Linear projection
-        attn = attn.reshape(b, seq_len, self.embed_dim)
-        return self.out(attn)
+        a1 = torch.cat((attn11,attn12), dim=-1)
+        a2 = torch.cat((attn21,attn22), dim=-1)
+        a = self.ln(a1 - self.lmd(q) * a2) * (1 - self.lambda_init)
+        a  = rearrange(a, "b l n h -> b l (n h)")
+        return self.out(a)
     
     
 
@@ -211,4 +249,3 @@ class DiffMHAFlash(nn.Module):
 
         return output
     
-

@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 import numpy as np
-
+import math
 from layers.tools.activations import get_activation_fn
 
 # from https://github.com/Stability-AI/stable-audio-tools/blob/main/stable_audio_tools/models/autoencoders.py and modified
@@ -24,9 +24,19 @@ class TemporalResBlock(nn.Module):
             nn.Conv1d(in_channels=out_channels, out_channels=out_channels,
                       kernel_size=1)
         )
-
+        self.beta = nn.Parameter(torch.zeros(1, dtype=torch.float32).normal_(mean=0,std=0.1))
+        
     def forward(self, x):
-        return x + self.layers(x)
+        '''
+        
+            Shao, J., Hu, K., Wang, C., Xue, X., & Raj, B. (2020). 
+            Is normalization indispensable for training deep neural network? 
+            Advances in Neural Information Processing Systems, 33, 13434-13444. (link, pdf)
+            
+            
+            -> normalization-free method.
+        '''
+        return ((1 - self.beta**2)**0.5) * x + self.beta * self.layers(x)
 
 class EncoderBlock(nn.Module):
     def __init__(
@@ -117,7 +127,7 @@ class OobleckDecoder(nn.Module):
     def __init__(self, 
                  out_channels=1, 
                  channels=128, 
-                 latent_dim=64, 
+                 latent_dim=128, 
                  c_mults = [1, 2, 4, 8, 16], 
                  strides = [2, 4, 8, 8, 8],):
                
@@ -128,6 +138,7 @@ class OobleckDecoder(nn.Module):
         self.depth = len(c_mults)
 
         layers = [
+            get_activation_fn("snake", in_chn=latent_dim),
             nn.Conv1d(in_channels=latent_dim, out_channels=c_mults[-1]*channels, kernel_size=7, padding=3),
         ]
         
@@ -176,9 +187,22 @@ class VAEBottleneck(nn.Module):
         else:
             return x
 
-    def decode(self, x):
+    def decode(self,x):
         return x
-
+    
+class AEBottleneck(nn.Module):
+    def __init__(self):
+        super().__init__()
+        
+  
+    def encode(self, x, return_info=False, **kwargs):
+        
+        if return_info:
+            return x, {}
+        else:
+            return x
+    def decode(self,x):
+        return x
 
 
 class AudioAutoencoder(nn.Module):
@@ -186,12 +210,11 @@ class AudioAutoencoder(nn.Module):
         self,
         encoder=OobleckEncoder(),
         decoder=OobleckDecoder(),
-        latent_dim=64, 
         # chn increases 1 -> 128 -> 256 ... 2048 -> 32(VAE) -> 32(VAE) -> 2048 -> ... 1
         downsampling_ratio=2048,
         sample_rate=8000,
         io_channels=1,
-        bottleneck = VAEBottleneck(),
+        bottleneck = AEBottleneck(),
         in_channels = 1,
         out_channels = 1,
     ):
@@ -200,18 +223,15 @@ class AudioAutoencoder(nn.Module):
         self.downsampling_ratio = downsampling_ratio
         self.sample_rate = sample_rate
 
-        self.latent_dim = latent_dim
         self.io_channels = io_channels
         self.in_channels = io_channels
         self.out_channels = io_channels
 
         self.min_length = self.downsampling_ratio
 
-        if in_channels is not None:
-            self.in_channels = in_channels
+        self.in_channels = in_channels
 
-        if out_channels is not None:
-            self.out_channels = out_channels
+        self.out_channels = out_channels
 
         self.bottleneck = bottleneck
 
@@ -225,6 +245,9 @@ class AudioAutoencoder(nn.Module):
     def encode(self, audio, return_info=False, **kwargs):
 
         info = {}
+        while (audio.dim() != 3):
+            audio = audio.unsqueeze(1) if audio.dim() < 3 else audio.squeeze(1)
+            
         latents = self.encoder(audio)
 
         latents, bottleneck_info = self.bottleneck.encode(latents, return_info=True, **kwargs)
@@ -240,6 +263,8 @@ class AudioAutoencoder(nn.Module):
         latents = self.bottleneck.decode(latents)
         decoded = self.decoder(latents, **kwargs)
        
+        while (decoded.dim() != 2):
+            decoded = decoded.squeeze(1) if decoded.dim() > 2 else decoded.unsqueeze(1)
         return decoded
    
     
@@ -355,3 +380,51 @@ def create_diffAE_from_config(config: Dict[str, Any]):
         pretransform=pretransform
     )
 '''
+
+
+class AutoEncoderWrapper(nn.Module):
+    def __init__(
+        self,
+        autoencoder = AudioAutoencoder(),
+        autoencoder_state_path = None,
+        ):
+        super().__init__()
+        self.ae = autoencoder  
+        if (autoencoder_state_path is not None):
+            if torch.cuda.is_available():
+                print("Loaded Pretrained autoencoder. (CUDA)")
+                self.ae.state_dict(torch.load(autoencoder_state_path))
+            else:
+                print("Loaded Pretrained autoencoder. (CPU)")
+                self.ae.state_dict(torch.load(autoencoder_state_path,map_location='cpu'))
+        else:
+            print("Pretrained autoencoder not found. It is recommended to use pretrained autoencoder.")
+            
+    @torch.no_grad()
+    def get_latents_shape(self, example):
+        bs, chn, seq = self.ae.encode(example).shape
+        return bs, chn, seq # for 1, 16384, we have 1, 64, 4
+    
+    
+    def encode(self, x):
+        return self.ae.encode(x)
+    
+    def decode(self, x):
+        return self.ae.decode(x)
+    
+    
+    def freeze_encoder(self):
+        for layer in self.ae.encoder.parameters():
+            layer.requires_grad = False
+        
+    def freeze_decoder(self):
+        for layer in self.ae.decoder.parameters():
+            layer.requires_grad = False
+        
+    def unfreeze_encoder(self):
+        for layer in self.ae.encoder.parameters():
+            layer.requires_grad = True
+        
+    def unfreeze_decoder(self):
+        for layer in self.ae.decoder.parameters():
+            layer.requires_grad = True
