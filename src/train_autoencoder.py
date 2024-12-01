@@ -11,43 +11,94 @@ from tqdm import tqdm
 import wandb
 import argparse
 import pytorch_warmup as warmup
-from layers.autoencoder.vae import AudioAutoencoder
+from layers.autoencoder.vae import AudioAutoencoder,AEBottleneck
 from layers.tools.losses import *
+
+
+def print_model_size(name, model):
+    for name, param in model.named_parameters():
+        print(f"Layer: {name} | Size: {param.size()}") 
+            
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)  
+    print(f"{name} | Trainable[requires_grad] parameters: {total_params}")
+    
+    
 class Trainer:
     def __init__(self, cfg_path):
+        
+        self.best_eval_loss = 777_777_777
+        self.configure_config(cfg_path)
+        self.configure_model()
+        self.configure_loss()
+        self.configure_loader()
+        self.configure_optimizer()
+        self.configure_wandb()
+        
+    
+    def configure_config(self, cfg_path):
         with open(cfg_path) as stream:
             self.cfg = yaml.safe_load(stream)
             self.FFT_CFG = self.cfg['fft']
             self.MODEL_CFG = self.cfg['model']
             self.FILE_CFG = self.cfg['file']
-
-        '''MODEL'''
+            
+    def configure_model(self):
         self.net = AudioAutoencoder(
-            sample_rate=self.FFT_CFG['sr'],
-            downsampling_ratio=self.FFT_CFG['downsampling_ratio']
+            sample_rate = self.FFT_CFG['sr'],
+            downsampling_ratio = self.FFT_CFG['downsampling_ratio'],
+            bottleneck = AEBottleneck()
         ).to(self.MODEL_CFG['device'])
         
+        if (self.MODEL_CFG['pretrained_autoencoder'] != False):
+            print(f"Loaded pretrained model at {self.MODEL_CFG['pretrained_autoencoder']} | File exists: {os.path.exists(self.MODEL_CFG['pretrained_autoencoder'])}")
+            self.net.load_state_dict(torch.load(self.MODEL_CFG['pretrained_autoencoder']))
+            
+        if (self.MODEL_CFG['freeze_encoder']):
+            print("Encoder freezed.")
+            self.net.encoder.requires_grad_ = False
+        
+        if (self.MODEL_CFG['freeze_decoder']):
+            print("Decoder freezed.")
+            self.net.decoder.requires_grad_ = False
+            
+        print_model_size("Autoencoder", self.net)
+        
+    def configure_loss(self):
+        '''
+            Configure Only generator Loss. Discriminator loss is configured at (configure_optimizer).
+        '''
         self.loss = LossModule(name="AutoEncoder")
         self.loss.append("mrstft", weight_loss=0.25, module=MultiResolutionSTFTLoss(
             sample_rate=self.FFT_CFG['sr']).to(self.MODEL_CFG['device']))
         self.loss.append("L1", weight_loss=0.1,module=L1Loss().to(self.MODEL_CFG['device']))        
 
-        
-        
-        
+    
+    def configure_loader(self):
+        tensors = load_mp3_files(base_folder=self.FILE_CFG['audio_folder'], config=self.FFT_CFG)
+        tensors = torch.cat(tensors, dim=-1)
+
+        x = create_overlapping_chunks_tensor(sequence=tensors, config=self.FFT_CFG)
+        x = x[torch.randperm(x.size(0))]
+
+        train = TensorDataset(x[:-self.FFT_CFG['num_evaluation'], :])
+        test = TensorDataset(x[-self.FFT_CFG['num_evaluation']:, :])
+        self.train_loader = DataLoader(train, batch_size=self.MODEL_CFG['batch_size'], num_workers=self.MODEL_CFG['num_workers'], shuffle=True)
+        self.test_loader = DataLoader(test, batch_size=self.MODEL_CFG['batch_size'], num_workers=self.MODEL_CFG['num_workers'], shuffle=False)
+
+
+    def configure_optimizer(self):
         #warmup_period = self.MODEL_CFG['warmup_period']
         self.discriminator = EncodecDiscriminator().to(self.MODEL_CFG['device'])
         self.optim_dis = AdamW(self.discriminator.parameters(), lr=self.MODEL_CFG['lr'] * 2, betas=(0.8,0.99))
         #self.lr_schedule_dis = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim_dis, T_max=num_steps)
         #self.warmup_schedule_dis = warmup.ExponentialWarmup(self.optim_dis, warmup_period)
+        
         self.optim_gen = AdamW(self.net.parameters(), lr=self.MODEL_CFG['lr'], betas=(0.8,0.99))
         #self.lr_schedule_gen = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim_gen, T_max=num_steps)
         #self.warmup_schedule_gen = warmup.ExponentialWarmup(self.optim_gen, warmup_period)
         
         
-        '''LOG'''
-        self.best_eval_loss = 1e+7
-        self.train_loader, self.test_loader = self.getLoader()
+    def configure_wandb(self):
         wandb_store = os.path.join(self.FILE_CFG['log_dir'],"wandb_store")
         os.makedirs(wandb_store,exist_ok=True)
        
@@ -61,14 +112,9 @@ class Trainer:
             },
             
         )
-    
-
- 
+        
     def train(self):
-        for name, param in self.net.named_parameters():
-            print(f"Layer: {name} | Size: {param.size()}") 
-        total_params = sum(p.numel() for p in self.net.parameters() if p.requires_grad)  
-        print(f"Total trainable parameters: {total_params:,}")
+        
         
         EPOCH = self.MODEL_CFG['epoch']
         LOG_DIR = self.FILE_CFG['log_dir']
@@ -135,7 +181,7 @@ class Trainer:
                     ORIG_DIR = os.path.join(LOG_DIR, f"original_epoch_{epoch+1}")
                     os.makedirs(FAKE_DIR, exist_ok=True)
                     os.makedirs(ORIG_DIR, exist_ok=True)
-                    for idx,x in enumerate(self.test_loader):
+                    for idx, x in enumerate(self.test_loader):
                         x = x[0].to(self.MODEL_CFG['device'])
                         latents = self.net.encode(x)
                         decoded = self.net.decode(latents)
@@ -145,17 +191,15 @@ class Trainer:
                         self.generate_samples(x,output_dir=ORIG_DIR, name="real")
                         
                         EVAL_LOSS.append(loss.detach().cpu().item())
-            
+
                 avg_eval_loss = sum(EVAL_LOSS) / len(EVAL_LOSS)
                 wandb.log({"eval_loss": avg_eval_loss})
                 print(f"Evaluation Loss: {avg_eval_loss:.4f}")
-                
                 
                 if avg_eval_loss < self.best_eval_loss:
                     self.best_eval_loss = avg_eval_loss
                     torch.save(self.net.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
                     print(f"Best model saved at {LOG_DIR}/best_model.pth")
-           
                 self.net.train()
 
             if ((epoch) % 10 == 0):
@@ -167,20 +211,7 @@ class Trainer:
 
 
 
-    def getLoader(self):
-        tensors = load_mp3_files(base_folder=self.FILE_CFG['audio_folder'], config=self.FFT_CFG)
-        tensors = torch.cat(tensors, dim=-1)
-
-        x = create_overlapping_chunks_tensor(sequence=tensors, config=self.FFT_CFG)
-        x = x[torch.randperm(x.size(0))]
-
-        train = TensorDataset(x[:-self.FFT_CFG['num_evaluation'], :])
-        test = TensorDataset(x[-self.FFT_CFG['num_evaluation']:, :])
-        trainLoader = DataLoader(train, batch_size=self.MODEL_CFG['batch_size'], num_workers=self.MODEL_CFG['num_workers'], shuffle=True)
-        testLoader = DataLoader(test, batch_size=self.MODEL_CFG['batch_size'], num_workers=self.MODEL_CFG['num_workers'], shuffle=False)
-
-
-        return trainLoader, testLoader
+    
 
 
     def generate_samples(
@@ -197,10 +228,6 @@ class Trainer:
             wandb.log({f"{name}/Sample {i}": wandb.Audio(sample, sample_rate=self.FFT_CFG['sr'])})
 
      
-
-    
-    
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

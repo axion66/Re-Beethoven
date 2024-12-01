@@ -17,7 +17,7 @@ from layers.autoencoder.vae import AutoEncoderWrapper,AudioAutoencoder
 from layers.tools.losses import *
 
 
-def model_size(name, model):
+def print_model_size(name, model):
     for name, param in model.named_parameters():
         print(f"Layer: {name} | Size: {param.size()}") 
             
@@ -59,9 +59,9 @@ class Trainer:
             device = torch.device(self.MODEL_CFG['device'])
         ).to(self.MODEL_CFG['device'])
     
-        model_size("Autoencoder", self.autoencoder)
-        model_size("DiT", self.dit)
-        model_size("Denoiser", self.denoiser)
+        print_model_size("Autoencoder", self.autoencoder)
+        print_model_size("DiT", self.dit)
+        print_model_size("Denoiser", self.denoiser)
     
     def configure_loader(self):
         batches = load_files(base_folder=self.FILE_CFG['audio_folder'], config=self.FFT_CFG)
@@ -205,9 +205,7 @@ class Trainer:
             filename = os.path.join(output_dir, f"Sample_{idx}.wav")
             sf.write(filename, sample, self.FFT_CFG['sr'])
 
-        print(f"Generated {num_samples} samples and saved to {output_dir}")
-
-    
+        print(f"Generated {num_samples} samples and saved to {output_dir}")    
     
 
 
