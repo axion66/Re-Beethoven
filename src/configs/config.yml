@@ -2,7 +2,7 @@ fft:
   n_fft: 512
   win_len: 512
   hop_length: 256
-  seq_len: 3145728
+  seq_len: 32768
   overlap_ratio: 2
   cut_first: 4000
   sr: 16000
@@ -24,9 +24,9 @@ model:
   evaluation_cycle: 1
   sampling_steps: [50, 100, 100]
   num_samples: 6
-  pretrained_autoencoder: "../models/final3.pth"
-  freeze_encoder: True
-  freeze_decoder: True
+  pretrained_autoencoder: "../models/last.pth"
+  freeze_encoder: False
+  freeze_decoder: False
 file:
   audio_folder: "../demo_dataset"
   log_dir: "../train_log/"
