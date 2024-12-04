@@ -12,3 +12,5 @@ dataset/train_labels
 dataset_test/
 src/wandb/
 src/train_log/
+
+audioset/*

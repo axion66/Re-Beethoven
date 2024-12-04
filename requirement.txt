@@ -12,3 +12,4 @@ mamba-ssm
 causal_conv1d
 encodec
 wandb
+audioset_download
