@@ -92,7 +92,7 @@ class Trainer:
     def configure_optimizer(self):
         warmup_period = self.MODEL_CFG['warmup_period']
         num_steps = len(self.train_loader) * self.MODEL_CFG['epoch'] - warmup_period
-        self.optim = AdamW(self.denoiser.parameters(recurse=True), lr=self.MODEL_CFG['lr'], betas=(0.9, 0.999), weight_decay=0.01)
+        self.optim = AdamW(self.denoiser.parameters(recurse = True), lr = self.MODEL_CFG['lr'], betas = (0.9, 0.999), weight_decay=0.01)
         self.lr_schedule = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim, T_max=num_steps)
         self.warmup_schedule = warmup.ExponentialWarmup(self.optim, warmup_period)
 
@@ -123,24 +123,27 @@ class Trainer:
         os.makedirs(LOG_DIR, exist_ok=True)
 
         step = 0
+        scaler = torch.GradScaler(device="cuda" if torch.cuda.is_available() else "cpu")
+
         for epoch in range(self.MODEL_CFG['epoch']):
             
             EPOCH_LOSS = []
 
             for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{EPOCH}")):
-                
-                x = x[0].to(self.MODEL_CFG['device'])
-                loss = self.denoiser.loss_fn(x)
-                
                 self.optim.zero_grad()
-                loss.backward()
-                self.optim.step()
+
+                x = x[0].to(self.MODEL_CFG['device'])
+                with torch.autocast(device_type = "cuda" if torch.cuda.is_available() else "cpu", dtype = torch.float16):
+                    loss = self.denoiser.loss_fn(x)
                 
+                scaler.scale(loss).backward()
+                scaler.step(self.optim)
+                scaler.update()
+            
                 with self.warmup_schedule.dampening():
                     if self.warmup_schedule.last_step + 1 >= self.MODEL_CFG['warmup_period']:
                         self.lr_schedule.step()
                 
-                # Timestamp Loss, LR
                 EPOCH_LOSS.append(loss.item())
                 wandb.log({"timestamp_loss": loss.item(), "lr": self.optim.param_groups[0]['lr']})
                 step += 1
