@@ -5,7 +5,7 @@ import math
 import numpy as np
 import math
 from layers.tools.activations import get_activation_fn
-
+import time
 # from https://github.com/Stability-AI/stable-audio-tools/blob/main/stable_audio_tools/models/autoencoders.py and modified
 
 class TemporalResBlock(nn.Module):
@@ -242,9 +242,11 @@ class AudioAutoencoder(nn.Module):
 
  
 
-    def encode(self, audio, return_info=False, **kwargs):
-
+    def encode(self, audio :torch.Tensor, return_info=False, **kwargs):
         info = {}
+        mean, std = audio.mean(dim = -1, keepdim = True), audio.std(dim = -1, keepdim = True)
+        audio = (audio - mean) / std
+        
         while (audio.dim() != 3):
             audio = audio.unsqueeze(1) if audio.dim() < 3 else audio.squeeze(1)
             
@@ -405,9 +407,10 @@ class AutoEncoderWrapper(nn.Module):
         
     @torch.no_grad()
     def get_latents_shape(self, example):
-        bs, chn, seq = self.ae.encode(example).shape
-        return bs, chn, seq # for 1, 16384, we have 1, 64, 4
-    
+        t_a = time.time()
+        bs, chn, seq = self.encode_audio(example).shape
+        print(f"Took {time.time() - t_a} seconds to handle {example.shape} tensor")
+        return bs, chn, seq     # for 1, 16384, we have 1, 64, 4
     
     def encode(self, x):
         return self.ae.encode(x)
@@ -551,17 +554,13 @@ class AutoEncoderWrapper(nn.Module):
 
 
     def freeze_encoder(self):
-        for layer in self.ae.encoder.parameters():
-            layer.requires_grad = False
+        self.ae.encoder.requires_grad_(False)
         
     def freeze_decoder(self):
-        for layer in self.ae.decoder.parameters():
-            layer.requires_grad = False
+        self.ae.decoder.requires_grad_(False)
         
     def unfreeze_encoder(self):
-        for layer in self.ae.encoder.parameters():
-            layer.requires_grad = True
+        self.ae.encoder.requires_grad_(True)
         
     def unfreeze_decoder(self):
-        for layer in self.ae.decoder.parameters():
-            layer.requires_grad = True
+        self.ae.decoder.requires_grad_(True)

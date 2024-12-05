@@ -55,7 +55,7 @@ def resample(waveform : T, orig_sr:int, new_sr:int):
     return transform_book[key](waveform)
 
 def load_audio(filepath:str,config):
-    waveform, sr = torchaudio.load(filepath)
+    waveform, sr = torchaudio.load(filepath, normalize = True)      # normalize audio into [-1, 1]
     waveform = stereo_to_mono(waveform = waveform)
     waveform = resample(waveform = waveform, orig_sr = sr, new_sr = config['sr'])
     waveform = divide(waveform = waveform, n = config['hop_length'], cut_first = config['cut_first'])
@@ -66,10 +66,12 @@ def load_files(base_folder:str,config):
     for root, _, files in os.walk(base_folder):
         for file in files:
             if file.endswith(".mp3") or file.endswith(".wav"):
-                file_path = os.path.join(root, file)
-                waveform = load_audio(file_path,config)
-                audio_tensors.append(waveform)
-    
+                try:
+                    file_path = os.path.join(root, file)
+                    waveform = load_audio(file_path,config)
+                    audio_tensors.append(waveform)
+                except:
+                    print(f"Error on passing audiofile {file}")
     
     return audio_tensors
 

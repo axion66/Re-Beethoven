@@ -13,7 +13,7 @@ fft:
   num_evaluation: 4
   downsampling_ratio: 2048
   num_heads: 8
-  embed_dim: 512
+  embed_dim: 1024
 model:
   epoch: 200
   device: "cuda:0"

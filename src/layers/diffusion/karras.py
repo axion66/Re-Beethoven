@@ -14,14 +14,14 @@ class Denoiser(nn.Module):
         self,
         config,
         model: nn.Module,
-        sigma_data: float=0.5,  # data distribution standard deviation
-        sigma_min=0.002,
-        sigma_max=80, # paper suggests 80, but I will go with 3
-        rho: float = 7.0, # for image, set it 7
-        s_churn: float = 40.0, # controls stochasticity(SDE)  0 for deterministic(ODE)
-        s_tmin: float = 0.05, # I need to find with grid search, but who wants to do that..
-        s_tmax: float = 1e+8, # Figure 15 (yellow line)
-        s_noise: float = 1.003, # to inflate std for newly added noise.
+        sigma_data: float = 0.5,  
+        sigma_min : float = 0.002,
+        sigma_max : float = 80.0,
+        rho: float = 7.0, 
+        s_churn: float = 40.0, 
+        s_tmin: float = 0.05, 
+        s_tmax: float = 1e+8, 
+        s_noise: float = 1.001, 
         device: torch.device = torch.device("cuda:0")
     ):
         super().__init__()
@@ -29,17 +29,15 @@ class Denoiser(nn.Module):
         self.device = device
         self.model = model
         self.sigma_data = sigma_data
-        self.sigma_noise = lambda num_samples: (torch.randn((num_samples,1),device=device) * 1.2 - 1.2).exp()
         self.sigma_min = sigma_min
-        self.sigma_max = sigma_max # Too high.
+        self.sigma_max = sigma_max 
         self.rho = rho
-        self.rho_inverse = 1.0 / rho
+        self.s_churn = s_churn
         self.s_tmin = s_tmin
         self.s_tmax = s_tmax
-        self.s_churn = s_churn
         self.s_noise = s_noise
-
-    
+        self.sigma_noise = lambda num_samples: (torch.randn((num_samples, 1), device = device) - 0.4).exp()
+        
 
     def get_scalings(self,sigmas):
         c_skip = (self.sigma_data ** 2) / (sigmas**2 + self.sigma_data**2)
@@ -57,56 +55,37 @@ class Denoiser(nn.Module):
         return x[(...,) + (None,) * dims_to_append]
 
 
-    def forward(self, x: Tensor,sigmas=None) -> Tensor:
-        # std transformation & RevIN
-        # x: batch, audio_length
-        b, device = x.shape[0], x.device
-
-        #std 
-        x_mean,x_std = x.mean(dim=-1,keepdim=True),x.std(dim=-1,keepdim=True)
-        x = (x - x_mean) * self.sigma_data / x_std
-
+    def forward(self, x: Tensor, sigmas = None) -> Tensor:
         
-        # noise
-        if sigmas is None:
-            sigmas = self.sigma_noise(num_samples=b)
-        x_noised = x + (torch.randn_like(x) * sigmas) # randn_like * sigmas == noise
+        sigmas = self.sigma_noise(num_samples = x.shape[0]) if sigmas is None else sigmas
+        while (sigmas.ndim < x.ndim):
+            sigmas = sigmas.unsqueeze(-1)
 
+        noise = torch.randn_like(x) * sigmas
         c_skip, c_out, c_in, c_noise = [self.append_dims(x, x.ndim) for x in self.get_scalings(sigmas)]
-        x_denoised = self.model(c_in * x_noised, c_noise) * c_out + x * c_skip
+        x_denoised = self.model(c_in * (x + noise), c_noise) * c_out + x * c_skip
         
-        #std
-        x_denoised = x_denoised * x_std / self.sigma_data + x_mean
         return x_denoised, sigmas
 
     def loss_fn(self,x:Tensor):
  
         b, device = x.shape[0], x.device
 
-        # std transform
-        x_mean, x_std = x.mean(dim=-1,keepdim=True),x.std(dim=-1,keepdim=True)
-        x = (x - x_mean) * self.sigma_data / x_std
-            
-        # noise
-        #mask = torch.rand_like(x) < 0.95  #70 will be noise, while other 30 will be unnoised.
         sigmas = self.sigma_noise(num_samples=b)
         x_noised = x + (torch.randn_like(x) * sigmas) # randn_like * sigmas == noise
 
 
         c_skip, c_out, c_in, c_noise = [self.append_dims(x, x.ndim) for x in self.get_scalings(sigmas)]
-        x_denoised = self.model(c_in * x_noised, c_noise)#   * c_out + x * c_skip -> replaced by changing original x.
-        x = (x - c_skip * x_noised) / c_out # instead of transforming the x_denoised, we transform the original x.
-
+        x_denoised = self.model(c_in * x_noised, c_noise) #   * c_out + x * c_skip -> replaced by changing original x.
+        x = (x - c_skip * x_noised) / c_out 
+        
         loss = self._weighting_snr(sigmas) * ((x_denoised - x)**2)
         return loss.reshape(-1).mean()
 
 
     def _weighting_snr(self, sigmas):
-        #return (sigmas ** 2 + self.sigma_data ** 2) / (sigmas * self.sigma_data) ** 2 -> crazy-level magnitude.(0.5 to 1000)
-        return self.sigma_data ** 2 / (sigmas ** 2 + self.sigma_data ** 2) #(snr)
-        #return 1
+        return self.sigma_data ** 2 / (sigmas ** 2 + self.sigma_data ** 2) 
 
-    # sampling part
     @torch.no_grad()
     def sample(
         self,
@@ -138,11 +117,10 @@ class Denoiser(nn.Module):
     def _schudule_sigmas(self, num_steps: int):
         steps = torch.arange(num_steps, device=self.device, dtype=torch.float32) 
         schuduled_sigmas = (
-            self.sigma_max ** self.rho_inverse
-            + (steps / (num_steps - 1)) * (self.sigma_min ** self.rho_inverse - self.sigma_max ** self.rho_inverse)
+            self.sigma_max ** (1.0 / self.rho)
+            + (steps / (num_steps - 1)) * (self.sigma_min ** (1.0 / self.rho) - self.sigma_max ** (1.0 / self.rho))
         ) ** self.rho
-        # sigmas maximum -> minimum, as sampling method goes backward(T to 0)
-        # Although original paper suggested maximum=80, We should go with maximum=0.8~3, as that's expected noise range used in training step is around there. (Also to reduce cost)
+
         schuduled_sigmas = torch.cat((schuduled_sigmas,schuduled_sigmas.new_zeros([1])))
         return schuduled_sigmas
 

@@ -34,7 +34,6 @@ class Trainer:
         self.configure_optimizer()
         self.configure_wandb()
         
-        self.best_eval_loss = 1e+7
         
     def configure_config(self, cfg_path):
         with open(cfg_path) as stream:
@@ -96,8 +95,6 @@ class Trainer:
         self.lr_schedule = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim, T_max=num_steps)
         self.warmup_schedule = warmup.ExponentialWarmup(self.optim, warmup_period)
 
-
-        
     def configure_wandb(self):
         wandb_store = os.path.join(self.FILE_CFG['log_dir'],"wandb_store")
         os.makedirs(wandb_store, exist_ok=True)
@@ -112,26 +109,20 @@ class Trainer:
             }
         )
         
-    
-            
-    
- 
     def train(self):
         
-        EPOCH = self.MODEL_CFG['epoch']
         LOG_DIR = self.FILE_CFG['log_dir']
         os.makedirs(LOG_DIR, exist_ok=True)
+        self.SAMPLE_DIR = os.path.join(LOG_DIR, "samples")
+        os.makedirs(self.SAMPLE_DIR, exist_ok=True)
+        self.best_eval_loss = 1e+7
 
         step = 0
-        scaler = torch.GradScaler(device="cuda" if torch.cuda.is_available() else "cpu")
-
+        scaler = torch.GradScaler(device = "cuda" if torch.cuda.is_available() else "cpu")
+        eval_step = self.MODEL_CFG['evaluation_cycle']
         for epoch in range(self.MODEL_CFG['epoch']):
-            
-            EPOCH_LOSS = []
-
-            for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{EPOCH}")):
+            for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{self.MODEL_CFG['epoch']}")):
                 self.optim.zero_grad()
-
                 x = x[0].to(self.MODEL_CFG['device'])
                 with torch.autocast(device_type = "cuda" if torch.cuda.is_available() else "cpu", dtype = torch.float16):
                     loss = self.denoiser.loss_fn(x)
@@ -139,75 +130,62 @@ class Trainer:
                 scaler.scale(loss).backward()
                 scaler.step(self.optim)
                 scaler.update()
-            
+
                 with self.warmup_schedule.dampening():
                     if self.warmup_schedule.last_step + 1 >= self.MODEL_CFG['warmup_period']:
                         self.lr_schedule.step()
+
+                wandb.log({"loss/train": loss.item(), "lr": self.optim.param_groups[0]['lr']})
                 
-                EPOCH_LOSS.append(loss.item())
-                wandb.log({"timestamp_loss": loss.item(), "lr": self.optim.param_groups[0]['lr']})
+
+
                 step += 1
-                if step % self.MODEL_CFG['evaluation_cycle'] == 0:
+                if step % eval_step == 0:
                     self.net.eval()
-                    EVAL_LOSS = []
                     with torch.no_grad():
+                        sum_loss = 0.0
+                    
                         for x in self.test_loader:
-                            x = x[0].to(self.MODEL_CFG['device']) # list to TEnsor
-                            loss = self.denoiser.loss_fn(x)
-                            EVAL_LOSS.append(loss.item())
-                
-                    avg_eval_loss = sum(EVAL_LOSS) / len(EVAL_LOSS)
-                    wandb.log({"eval_loss": avg_eval_loss})
-                    print(f"Evaluation Loss: {avg_eval_loss:.4f}")
-    
-                    if avg_eval_loss < self.best_eval_loss:
-                        self.best_eval_loss = avg_eval_loss
-                        torch.save(self.denoiser.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
-    
-                    STORE_SAMPLE_DIR = os.path.join(LOG_DIR, f"samples_epoch_{epoch+1}")
-                    for idx in range(self.MODEL_CFG['num_samples']):
-                        self.generate_samples(
-                            num_samples=1,#self.MODEL_CFG['num_samples'],
-                            num_steps=self.MODEL_CFG['sampling_steps'][idx],
-                            output_dir=STORE_SAMPLE_DIR,
-                            idx=idx
+                            x = x[0].to(self.MODEL_CFG['device']) 
+                            with torch.autocast(device_type = "cuda" if torch.cuda.is_available() else "cpu", dtype = torch.float16):
+                                loss = self.denoiser.loss_fn(x)
+                            wandb.log({"loss/evaluation": loss})
+                            sum_loss += loss
+                        
+                        wandb.log({"loss/evaluation_mean": sum_loss})
+                        if sum_loss < self.best_eval_loss:
+                            self.best_eval_loss = sum_loss
+                            torch.save(self.denoiser.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
+                            print(f"Best Model saved at epoch {epoch}")
+                            
+                        self.sample(
+                            num_samples = self.MODEL_CFG['num_samples'],
+                            num_steps = self.MODEL_CFG['sampling_steps'],
+                            epoch = epoch,
                         )
-    
-                    for i in range(self.MODEL_CFG['num_samples']):
-                        sample_path = os.path.join(STORE_SAMPLE_DIR, f"Sample_{i}.wav")
-                        wandb.log({f"Sample {i}": wandb.Audio(sample_path, sample_rate=self.FFT_CFG['sr'])})
                     self.net.train()
                 
-            # Epoch Loss
-            avg_train_loss = sum(EPOCH_LOSS) / len(EPOCH_LOSS)
-            wandb.log({"train_loss": avg_train_loss})
-            print(f"Epoch {epoch+1}/{EPOCH}, Average Train Loss: {avg_train_loss:.4f}")
 
-
-
-    
-        
-
-    def generate_samples(
+    @torch.no_grad()
+    def sample(
             self,
             num_samples: int,
             num_steps: int,
-            output_dir: str,
-            idx: int
+            epoch: int,
         ) -> None:
-        os.makedirs(output_dir, exist_ok=True)
 
-        with torch.no_grad():
-            generated_samples = self.model.sample(num_samples,num_steps)
+        STORE_SAMPLE_DIR = os.path.join(self.SAMPLE_DIR, f"Epoch_{epoch+1}")
+        os.makedirs(STORE_SAMPLE_DIR, exist_ok=True)
+
+        generated_samples = self.model.sample(num_samples, num_steps).cpu()
 
         for i in range(num_samples):
-            sample = generated_samples[i].cpu().numpy().flatten()
-            filename = os.path.join(output_dir, f"Sample_{idx}.wav")
+            sample = generated_samples[i].numpy().flatten()
+            filename = os.path.join(STORE_SAMPLE_DIR, f"{i}.wav")
             sf.write(filename, sample, self.FFT_CFG['sr'])
-
-        print(f"Generated {num_samples} samples and saved to {output_dir}")    
-    
-
+            wandb.log({f"samples/{i}": wandb.Audio(sample, sample_rate=self.FFT_CFG['sr'])})
+            
+ 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
