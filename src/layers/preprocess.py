@@ -19,7 +19,7 @@ def stereo_to_mono(waveform:T):
     '''
         waveform: [channel (1 for mono, 2 for stereo), length]
     '''
-    if waveform.size(0) == 2:  
+    if waveform.size(0) != 1:  
         return waveform.mean(dim=0).unsqueeze(0)
     return waveform  
 
