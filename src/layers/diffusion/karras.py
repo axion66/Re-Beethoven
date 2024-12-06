@@ -4,12 +4,26 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import reduce
 import math
+from functools import lru_cache, reduce
 # Karras et al. https://arxiv.org/pdf/2206.00364 implementation
+from tqdm import trange
+@lru_cache
+def freq_weight_1d(n, scales=0, dtype=None, device=None):
+    ramp = torch.linspace(0.5 / n, 0.5, n, dtype=dtype, device=device)
+    weights = -torch.log2(ramp)
+    if scales >= 1:
+        weights = torch.clamp_max(weights, scales)
+    return weights
 
-
+@lru_cache
+def freq_weight_nd(shape, scales=0, dtype=None, device=None):
+    indexers = [[slice(None) if i == j else None for j in range(len(shape))] for i in range(len(shape))]
+    weights = [freq_weight_1d(n, scales, dtype, device)[ix] for n, ix in zip(shape, indexers)]
+    return reduce(torch.minimum, weights)
 
 class Denoiser(nn.Module):
-
+    # mostly from https://github.com/crowsonkb/k-diffusion/blob/master/k_diffusion/layers.py
+    # also from https://github.com/Stability-AI/stable-audio-tools/blob/main/stable_audio_tools/inference/sampling.py#L179
     def __init__(
         self,
         config,
@@ -36,25 +50,108 @@ class Denoiser(nn.Module):
         self.s_tmin = s_tmin
         self.s_tmax = s_tmax
         self.s_noise = s_noise
-        self.sigma_noise = lambda num_samples: (torch.randn((num_samples, 1), device = device) * 1.2 - 1.45).exp()
+        self.sigma_noise = lambda num_samples: (torch.randn((num_samples, 1), device = device) * 1.2 - 1.2).exp()
         self.mse = nn.MSELoss()
-        self.rng = torch.quasirandom.SobolEngine(1, scramble=True)
-    def get_scalings(self,sigmas):
-        c_skip = (self.sigma_data ** 2) / (sigmas**2 + self.sigma_data**2)
-        c_out = sigmas * self.sigma_data / ((sigmas**2 + self.sigma_data**2) ** 0.5) 
-        c_in = 1 / ((sigmas**2 + self.sigma_data**2) ** 0.5) 
-        c_noise = sigmas.log() / 4 
-        return c_skip,c_out,c_in,c_noise
+        #self.rng = torch.quasirandom.SobolEngine(1, scramble=True) # for DDPM
 
 
-    def append_dims(self,x, target_dims):
-        """Appends dimensions to the end of a tensor until it has target_dims dimensions."""
-        dims_to_append = target_dims - x.ndim
-        if dims_to_append < 0:
+    def get_scalings(self, sigmas):
+        c_skip = self.sigma_data ** 2 / (sigmas ** 2 + self.sigma_data ** 2)
+        c_out = sigmas * self.sigma_data / (sigmas ** 2 + self.sigma_data ** 2) ** 0.5
+        c_in = 1 / (sigmas ** 2 + self.sigma_data ** 2) ** 0.5
+        return c_skip, c_out, c_in
+    
+  
+    def append_dims(self,x,target_dims):
+        if target_dims < x.ndim:
             raise ValueError(f'input has {x.ndim} dims but target_dims is {target_dims}, which is less')
-        return x[(...,) + (None,) * dims_to_append]
+        return x[(...,) + (None,) * (target_dims - x.ndim)]
+
+    def get_sigmas_karras(n, sigma_min, sigma_max, rho=7., device='cpu'):
+        """Constructs the noise schedule of Karras et al. (2022)."""
+        ramp = torch.linspace(0, 1, n)
+        min_inv_rho = sigma_min ** (1 / rho)
+        max_inv_rho = sigma_max ** (1 / rho)
+        sigmas = (max_inv_rho + ramp * (min_inv_rho - max_inv_rho)) ** rho
+        return torch.cat([sigmas, sigmas.new_zeros([1])]).to(device)
 
 
+
+    @torch.no_grad()
+    def _schudule_sigmas(self, num_steps: int):
+        steps = torch.arange(num_steps, device=self.device, dtype=torch.float32) 
+        schuduled_sigmas = (
+            self.sigma_max ** (1.0 / self.rho)
+            + (steps / (num_steps - 1)) * (self.sigma_min ** (1.0 / self.rho) - self.sigma_max ** (1.0 / self.rho))
+        ) ** self.rho
+
+        schuduled_sigmas = torch.cat((schuduled_sigmas,schuduled_sigmas.new_zeros([1])))
+        return schuduled_sigmas
+    
+
+    @torch.no_grad()
+    def sample(
+        num_samples: int,
+        disable=None,
+        s_churn=0.,
+        s_tmin=0.,
+        s_tmax=float('inf'),
+        s_noise=1.
+    ):
+        """Implements Algorithm 2 (Heun steps) from Karras et al. (2022)."""
+        x = torch.randn((num_samples, self.config['seq_len']))
+        sigmas = self._schudule_sigmas(50)
+        s_in = x.new_ones([x.shape[0]])
+        for i in trange(len(sigmas) - 1, disable=disable):
+            gamma = min(s_churn / (len(sigmas) - 1), 2 ** 0.5 - 1) if s_tmin <= sigmas[i] <= s_tmax else 0.
+            eps = torch.randn_like(x) * s_noise
+            sigma_hat = sigmas[i] * (gamma + 1)
+            if gamma > 0:
+                x = x + eps * (sigma_hat ** 2 - sigmas[i] ** 2) ** 0.5
+            denoised = self.model(x, sigma_hat * s_in)
+            d = self.to_d(x, sigma_hat, denoised)
+            dt = sigmas[i + 1] - sigma_hat
+            if sigmas[i + 1] == 0:
+                x = x + d * dt
+            else:
+                x_2 = x + d * dt
+                denoised_2 = self.model(x_2, sigmas[i + 1] * s_in)
+                d_2 = self.to_d(x_2, sigmas[i + 1], denoised_2)
+                d_prime = (d + d_2) / 2
+                x = x + d_prime * dt
+        return x
+
+    def to_d(self, x, sigma, denoised):
+        """Converts a denoiser output to a Karras ODE derivative."""
+        return (x - denoised) / self.append_dims(sigma, x.ndim)
+
+
+    def forward(self, input, sigmas=None, **kwargs):
+        if (sigmas is None):
+            sigmas = self.sigma_noise(input.shape[0])
+        c_skip, c_out, c_in = [self.append_dims(x, input.ndim) for x in self.get_scalings(sigmas)]
+        return self.inner_model(input * c_in, sigmas, **kwargs) * c_out + input * c_skip, sigmas
+
+
+    def loss_fn(self, input, sigmas=None, **kwargs):
+        if (sigmas is None):
+            sigmas = self.sigma_noise(num_samples=input.shape[0])
+
+        c_skip, c_out, c_in = [self.append_dims(x, input.ndim) for x in self.get_scalings(sigmas)]
+        c_weight = self.sigma_data ** 2 / (sigmas ** 2 + self.sigma_data ** 2)  # snr
+        noise = torch.randn_like(input)
+        noised_input = input + noise * self.append_dims(sigmas, input.ndim)
+        model_output = self.inner_model(noised_input * c_in, sigmas, **kwargs)
+        target = (input - c_skip * noised_input) / c_out
+        if self.scales == 1:
+            return ((model_output - target) ** 2).flatten(1).mean(1) * c_weight
+        sq_error = (model_output - target) ** 2
+        f_weight = freq_weight_nd(sq_error.shape[2:], self.scales, dtype=sq_error.dtype, device=sq_error.device)
+        return (sq_error * f_weight).flatten(1).mean(1) * c_weight
+
+
+
+    '''
     def forward(self, x: Tensor, sigmas = None) -> Tensor:
         
         sigmas = self.sigma_noise(num_samples = x.shape[0]) if sigmas is None else sigmas
@@ -67,26 +164,9 @@ class Denoiser(nn.Module):
         
         return x_denoised, sigmas
 
-    def get_alphas_sigmas(self, t):
-        """Returns the scaling factors for the clean image (alpha) and for the
-        noise (sigma), given a timestep."""
-        return torch.cos(t * math.pi / 2), torch.sin(t * math.pi / 2)
-
-    
     def loss_fn(self, x:Tensor):
  
-        t = self.rng.draw(x.shape[0])[:, 0].to(self.device)
-        
-        alphas, sigmas = self.get_alphas_sigmas(t)
-
-        alphas = alphas[:, None]
-        sigmas = sigmas[:, None]
-        noise = torch.randn_like(x)
-        noised_inputs = x * alphas + noise * sigmas
-        targets = noise * alphas - x * sigmas
-        out = self.model(noised_inputs, t)
-        return self.mse(out, targets)
-        '''
+       
         sigmas = self.sigma_noise(num_samples = x.shape[0])
         while (sigmas.ndim < x.ndim):
             sigmas = sigmas.unsqueeze(-1)
@@ -100,9 +180,9 @@ class Denoiser(nn.Module):
         snr_weight = self.sigma_data ** 2 / (sigmas ** 2 + self.sigma_data ** 2)
         loss = snr_weight * ((x_denoised - x)**2)
         
-        return loss.reshape(-1).mean()'''
+        return loss.reshape(-1).mean()
 
-
+    
     @torch.no_grad()
     def sample(
         self,
@@ -164,4 +244,4 @@ class Denoiser(nn.Module):
             x_next = x_hat + (sigma_next - sigma_hat) * 0.5 * (d + d_prime)
         
         return x_next
-    
+    '''

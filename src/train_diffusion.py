@@ -167,7 +167,6 @@ class Trainer:
                             
                         self.sample(
                             num_samples = self.MODEL_CFG['num_samples'],
-                            num_steps = self.MODEL_CFG['sampling_steps'],
                             epoch = epoch,
                         )
 
@@ -190,14 +189,13 @@ class Trainer:
     def sample(
             self,
             num_samples: int,
-            num_steps: int,
             epoch: int,
         ) -> None:
 
         STORE_SAMPLE_DIR = os.path.join(self.SAMPLE_DIR, f"Epoch_{epoch+1}")
         os.makedirs(STORE_SAMPLE_DIR, exist_ok=True)
 
-        generated_samples = self.denoiser.sample(num_samples, num_steps[-1]).cpu()
+        generated_samples = self.denoiser.sample(num_samples).cpu()
 
         for i in range(num_samples):
             sample = generated_samples[i].numpy().flatten()

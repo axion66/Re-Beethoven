@@ -22,7 +22,6 @@ model:
   warmup_period: 4000
   num_workers: 12
   evaluation_cycle: 10000
-  sampling_steps: [50, 100, 100]
   num_samples: 6
   pretrained_autoencoder: "../models/last.pth"
   freeze_encoder: True
