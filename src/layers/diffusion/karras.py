@@ -3,7 +3,7 @@ from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import reduce
-
+import math
 # Karras et al. https://arxiv.org/pdf/2206.00364 implementation
 
 
@@ -16,7 +16,7 @@ class Denoiser(nn.Module):
         model: nn.Module,
         sigma_data: float = 0.5,  
         sigma_min : float = 0.002,
-        sigma_max : float = 80.0,
+        sigma_max : float = 1.0,
         rho: float = 7.0, 
         s_churn: float = 40.0, 
         s_tmin: float = 0.05, 
@@ -36,9 +36,9 @@ class Denoiser(nn.Module):
         self.s_tmin = s_tmin
         self.s_tmax = s_tmax
         self.s_noise = s_noise
-        self.sigma_noise = lambda num_samples: (torch.randn((num_samples, 1), device = device) - 0.4).exp()
-        
-
+        self.sigma_noise = lambda num_samples: (torch.randn((num_samples, 1), device = device) * 1.2 - 1.45).exp()
+        self.mse = nn.MSELoss()
+        self.rng = torch.quasirandom.SobolEngine(1, scramble=True)
     def get_scalings(self,sigmas):
         c_skip = (self.sigma_data ** 2) / (sigmas**2 + self.sigma_data**2)
         c_out = sigmas * self.sigma_data / ((sigmas**2 + self.sigma_data**2) ** 0.5) 
@@ -60,16 +60,33 @@ class Denoiser(nn.Module):
         sigmas = self.sigma_noise(num_samples = x.shape[0]) if sigmas is None else sigmas
         while (sigmas.ndim < x.ndim):
             sigmas = sigmas.unsqueeze(-1)
-
+        
         noise = torch.randn_like(x) * sigmas
         c_skip, c_out, c_in, c_noise = [self.append_dims(x, x.ndim) for x in self.get_scalings(sigmas)]
         x_denoised = self.model(c_in * (x + noise), c_noise) * c_out + x * c_skip
         
         return x_denoised, sigmas
 
+    def get_alphas_sigmas(self, t):
+        """Returns the scaling factors for the clean image (alpha) and for the
+        noise (sigma), given a timestep."""
+        return torch.cos(t * math.pi / 2), torch.sin(t * math.pi / 2)
+
+    
     def loss_fn(self, x:Tensor):
  
+        t = self.rng.draw(x.shape[0])[:, 0].to(self.device)
+        
+        alphas, sigmas = self.get_alphas_sigmas(t)
 
+        alphas = alphas[:, None]
+        sigmas = sigmas[:, None]
+        noise = torch.randn_like(x)
+        noised_inputs = x * alphas + noise * sigmas
+        targets = noise * alphas - x * sigmas
+        out = self.model(noised_inputs, t)
+        return self.mse(out, targets)
+        '''
         sigmas = self.sigma_noise(num_samples = x.shape[0])
         while (sigmas.ndim < x.ndim):
             sigmas = sigmas.unsqueeze(-1)
@@ -83,7 +100,7 @@ class Denoiser(nn.Module):
         snr_weight = self.sigma_data ** 2 / (sigmas ** 2 + self.sigma_data ** 2)
         loss = snr_weight * ((x_denoised - x)**2)
         
-        return loss.reshape(-1).mean()
+        return loss.reshape(-1).mean()'''
 
 
     @torch.no_grad()

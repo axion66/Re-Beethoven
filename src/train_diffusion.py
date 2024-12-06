@@ -123,7 +123,7 @@ class Trainer:
         for epoch in range(self.MODEL_CFG['epoch']):
             for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{self.MODEL_CFG['epoch']}")):
                 self.optim.zero_grad()
-                
+
                 x = x[0].to(self.MODEL_CFG['device'])
                 with torch.autocast(device_type = "cuda" if torch.cuda.is_available() else "cpu", dtype = torch.float16):
                     loss = self.denoiser.loss_fn(x)
@@ -142,16 +142,22 @@ class Trainer:
 
                 step += 1
                 if step % eval_step == 0:
-                    self.net.eval()
                     with torch.no_grad():
                         sum_loss = 0.0
-                    
+                        FAKE_DIR = os.path.join(self.SAMPLE_DIR, f"generated_epoch_{epoch+1}")
+                        ORIG_DIR = os.path.join(self.SAMPLE_DIR, f"original_epoch_{epoch+1}")
+                        os.makedirs(FAKE_DIR, exist_ok = True)
+                        os.makedirs(ORIG_DIR, exist_ok = True)
                         for x in self.test_loader:
                             x = x[0].to(self.MODEL_CFG['device']) 
                             with torch.autocast(device_type = "cuda" if torch.cuda.is_available() else "cpu", dtype = torch.float16):
                                 loss = self.denoiser.loss_fn(x)
+                                decoded, sigmas = self.denoiser(x)
                             wandb.log({"loss/evaluation": loss})
                             sum_loss += loss
+                            self.generate_samples(decoded,output_dir=FAKE_DIR, name="denoised")
+                            self.generate_samples(x, output_dir=ORIG_DIR, name="real")
+
                         
                         wandb.log({"loss/evaluation_mean": sum_loss})
                         if sum_loss < self.best_eval_loss:
@@ -164,8 +170,21 @@ class Trainer:
                             num_steps = self.MODEL_CFG['sampling_steps'],
                             epoch = epoch,
                         )
-                    self.net.train()
-                
+
+    @torch.no_grad()  
+    def generate_samples(
+            self,
+            x,
+            output_dir: str,
+            name: str,
+        ) -> None:
+        x = x.cpu()
+        for i in range(x.size(0)):
+            sample = x[i].numpy().flatten()
+            filename = os.path.join(output_dir, f"{name}_{i}.wav")
+            sf.write(filename, sample, self.FFT_CFG['sr'])
+            wandb.log({f"{name}/Sample {i}": wandb.Audio(sample, sample_rate=self.FFT_CFG['sr'])})
+
 
     @torch.no_grad()
     def sample(
@@ -178,7 +197,7 @@ class Trainer:
         STORE_SAMPLE_DIR = os.path.join(self.SAMPLE_DIR, f"Epoch_{epoch+1}")
         os.makedirs(STORE_SAMPLE_DIR, exist_ok=True)
 
-        generated_samples = self.model.sample(num_samples, num_steps).cpu()
+        generated_samples = self.denoiser.sample(num_samples, num_steps[-1]).cpu()
 
         for i in range(num_samples):
             sample = generated_samples[i].numpy().flatten()

@@ -2,11 +2,11 @@ fft:
   n_fft: 512
   win_len: 512
   hop_length: 256
-  seq_len: 32768
+  seq_len: 262144
   overlap_ratio: 2
   cut_first: 4000
   sr: 16000
-  num_blocks: 16
+  num_blocks: 12
   activation_fn: "snake"
   norm_fn: "LayerNorm"
   dropout: 0.1
@@ -17,18 +17,18 @@ fft:
 model:
   epoch: 200
   device: "cuda:0"
-  batch_size: 1
+  batch_size: 16
   lr: 0.00015
   warmup_period: 4000
-  num_workers: 46
-  evaluation_cycle: 1
+  num_workers: 12
+  evaluation_cycle: 10000
   sampling_steps: [50, 100, 100]
   num_samples: 6
   pretrained_autoencoder: "../models/last.pth"
-  freeze_encoder: False
-  freeze_decoder: False
+  freeze_encoder: True
+  freeze_decoder: True
 file:
   audio_folder: "../demo_dataset"
   log_dir: "../train_log/"
   project_name: "DiT"
-  run_name: "1201-DiT"
+  run_name: "1206-DiT"
