@@ -67,11 +67,12 @@ class Denoiser(nn.Module):
         
         return x_denoised, sigmas
 
-    def loss_fn(self,x:Tensor):
+    def loss_fn(self, x:Tensor):
  
-        b, device = x.shape[0], x.device
 
-        sigmas = self.sigma_noise(num_samples=b)
+        sigmas = self.sigma_noise(num_samples = x.shape[0])
+        while (sigmas.ndim < x.ndim):
+            sigmas = sigmas.unsqueeze(-1)
         x_noised = x + (torch.randn_like(x) * sigmas) # randn_like * sigmas == noise
 
 
@@ -79,12 +80,11 @@ class Denoiser(nn.Module):
         x_denoised = self.model(c_in * x_noised, c_noise) #   * c_out + x * c_skip -> replaced by changing original x.
         x = (x - c_skip * x_noised) / c_out 
         
-        loss = self._weighting_snr(sigmas) * ((x_denoised - x)**2)
+        snr_weight = self.sigma_data ** 2 / (sigmas ** 2 + self.sigma_data ** 2)
+        loss = snr_weight * ((x_denoised - x)**2)
+        
         return loss.reshape(-1).mean()
 
-
-    def _weighting_snr(self, sigmas):
-        return self.sigma_data ** 2 / (sigmas ** 2 + self.sigma_data ** 2) 
 
     @torch.no_grad()
     def sample(

@@ -123,6 +123,7 @@ class Trainer:
         for epoch in range(self.MODEL_CFG['epoch']):
             for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{self.MODEL_CFG['epoch']}")):
                 self.optim.zero_grad()
+                
                 x = x[0].to(self.MODEL_CFG['device'])
                 with torch.autocast(device_type = "cuda" if torch.cuda.is_available() else "cpu", dtype = torch.float16):
                     loss = self.denoiser.loss_fn(x)
@@ -189,7 +190,7 @@ class Trainer:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("cfg_path", type=str, help="Path to the configuration YAML file")
+    parser.add_argument("cfg_path", type=str, default="configs/config.yml", help="Path to the configuration YAML file")
     args = parser.parse_args()
     
     trainer = Trainer(args.cfg_path)
