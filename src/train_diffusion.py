@@ -2,7 +2,7 @@ import os
 import yaml
 import torch
 import torch.nn as nn
-from layers.diffusion.karras import Denoiser
+from layers.diffusion.v import Denoiser
 from torch.optim import AdamW
 from layers.preprocess import load_files, create_overlapping_chunks_tensor
 from torch.utils.data import TensorDataset, DataLoader

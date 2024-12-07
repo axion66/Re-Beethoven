@@ -217,10 +217,18 @@ class DifferentialAttention(nn.Module):
         q = q.view(b, seq_len, 2 * self.num_heads, self.head_dim)   # batch, seq_len, 2 * n, h
         k = k.view(b, seq_len, 2 * self.num_heads, self.head_dim)   # batch, seq_len, 2 * n, h
         v = v.view(b, seq_len, self.num_heads, 2, self.head_dim)    # batch, seq_len, n,  2 * h
+        #v = v.view(b, seq_len, 2 * self.num_heads, self.head_dim)
         
         q = self.rotary.rotate_queries_or_keys(q)
         k = self.rotary.rotate_queries_or_keys(k)
-
+        '''if FLASH_ON:
+            q = q.to(torch.float16)
+            k = k.to(torch.float16)
+            v = v.to(torch.float16)
+            attn = flash_attn_func(q,k,v,causal=True)
+            attn = rearrange(attn, "b l n h -> b l (n h)").float()
+            return self.out(attn)'''
+        
         q = q.reshape(b, seq_len, self.num_heads, 2, self.head_dim)
         k = k.reshape(b, seq_len, self.num_heads, 2, self.head_dim)
         

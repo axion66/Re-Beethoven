@@ -45,19 +45,18 @@ class Denoiser(nn.Module):
     
     def forward(self, x: Tensor, sigmas = None) -> Tensor:
         t = self.rng.draw(x.shape[0])[:, 0].to(self.device)
-
         # Calculate the noise schedule parameters for those timesteps
         alphas, sigmas = self.get_alphas_sigmas(t)
 
         # Combine the ground truth data and the noise
-        alphas = alphas[:, None, None]
-        sigmas = sigmas[:, None, None]
+        alphas = alphas[:, None]
+        sigmas = sigmas[:, None]
         noise = torch.randn_like(x)
         noised_inputs = x * alphas + noise * sigmas
         out = self.model(noised_inputs, t)
         #targets = noise * alphas - x * sigmas
         denoised = x * alphas - out
-        return denoised        
+        return denoised, t      
         
 
     def get_alphas_sigmas(self, t):
@@ -67,15 +66,13 @@ class Denoiser(nn.Module):
 
 
     def loss_fn(self, x:Tensor):
-
-        t = self.rng.draw(x.shape[0])[:, 0].to(self.device)
-
+        t = self.rng.draw(x.shape[0])[:, 0].to(self.device) # it will only as a biased uniform distribution
         # Calculate the noise schedule parameters for those timesteps
         alphas, sigmas = self.get_alphas_sigmas(t)
 
         # Combine the ground truth data and the noise
-        alphas = alphas[:, None, None]
-        sigmas = sigmas[:, None, None]
+        alphas = alphas[:, None]
+        sigmas = sigmas[:, None]
         noise = torch.randn_like(x)
         noised_inputs = x * alphas + noise * sigmas
         targets = noise * alphas - x * sigmas
@@ -87,7 +84,7 @@ class Denoiser(nn.Module):
     def sample(self, num_samples):
         """Draws samples from a model given starting noise. v-diffusion"""
         x = torch.randn((num_samples, self.config['seq_len']), device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
-        steps = 60
+        steps = 40
         eta = 0  
         ts = x.new_ones([x.shape[0]])
         t = torch.linspace(1, 0, steps + 1)[:-1]
@@ -98,7 +95,7 @@ class Denoiser(nn.Module):
         for i in trange(steps):
 
             # Get the model output (v, the predicted velocity)
-            with torch.amp.autocast(device = "cuda" if torch.cuda.is_available() else "cpu"):
+            with torch.amp.autocast(device_type = "cuda" if torch.cuda.is_available() else "cpu"):
                 v = self.model(x, ts * t[i]).float()
 
             # Predict the noise and the denoised image
@@ -122,6 +119,7 @@ class Denoiser(nn.Module):
                 if eta:
                     x += torch.randn_like(x) * ddim_sigma
 
+    
         # If we are on the last timestep, output the denoised image
         return pred
 

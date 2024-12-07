@@ -34,7 +34,7 @@ def divide(waveform : T, n, cut_first):
     _, length = waveform.shape
     new_length = length - (length % n)
     return waveform[:, :new_length]
-     
+    
 
 def resample(waveform : T, orig_sr:int, new_sr:int):
     if (orig_sr == new_sr):
