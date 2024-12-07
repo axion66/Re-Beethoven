@@ -4,22 +4,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import reduce
 import math
-from functools import lru_cache, reduce
 # Karras et al. https://arxiv.org/pdf/2206.00364 implementation
 from tqdm import trange
-@lru_cache
-def freq_weight_1d(n, scales=0, dtype=None, device=None):
-    ramp = torch.linspace(0.5 / n, 0.5, n, dtype=dtype, device=device)
-    weights = -torch.log2(ramp)
-    if scales >= 1:
-        weights = torch.clamp_max(weights, scales)
-    return weights
-
-@lru_cache
-def freq_weight_nd(shape, scales=0, dtype=None, device=None):
-    indexers = [[slice(None) if i == j else None for j in range(len(shape))] for i in range(len(shape))]
-    weights = [freq_weight_1d(n, scales, dtype, device)[ix] for n, ix in zip(shape, indexers)]
-    return reduce(torch.minimum, weights)
 
 class Denoiser(nn.Module):
     # mostly from https://github.com/crowsonkb/k-diffusion/blob/master/k_diffusion/layers.py
@@ -91,6 +77,7 @@ class Denoiser(nn.Module):
 
     @torch.no_grad()
     def sample(
+        self,
         num_samples: int,
         disable=None,
         s_churn=0.,
@@ -130,7 +117,7 @@ class Denoiser(nn.Module):
         if (sigmas is None):
             sigmas = self.sigma_noise(input.shape[0])
         c_skip, c_out, c_in = [self.append_dims(x, input.ndim) for x in self.get_scalings(sigmas)]
-        return self.inner_model(input * c_in, sigmas, **kwargs) * c_out + input * c_skip, sigmas
+        return self.model(input * c_in, sigmas, **kwargs) * c_out + input * c_skip, sigmas
 
 
     def loss_fn(self, input, sigmas=None, **kwargs):
@@ -141,14 +128,10 @@ class Denoiser(nn.Module):
         c_weight = self.sigma_data ** 2 / (sigmas ** 2 + self.sigma_data ** 2)  # snr
         noise = torch.randn_like(input)
         noised_input = input + noise * self.append_dims(sigmas, input.ndim)
-        model_output = self.inner_model(noised_input * c_in, sigmas, **kwargs)
+        model_output = self.model(noised_input * c_in, sigmas, **kwargs)
         target = (input - c_skip * noised_input) / c_out
-        if self.scales == 1:
-            return ((model_output - target) ** 2).flatten(1).mean(1) * c_weight
-        sq_error = (model_output - target) ** 2
-        f_weight = freq_weight_nd(sq_error.shape[2:], self.scales, dtype=sq_error.dtype, device=sq_error.device)
-        return (sq_error * f_weight).flatten(1).mean(1) * c_weight
-
+        return (self.mse(model_output, target) * c_weight).reshape(-1).mean()
+  
 
 
     '''

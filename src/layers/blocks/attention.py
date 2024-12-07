@@ -209,6 +209,7 @@ class DifferentialAttention(nn.Module):
         ):   
         # NOV 24: remove adding sigmas, 
         # but rather use adaLN-zero in transformer level.
+        # note that w/ correct implementation of DDPM, regular flash-attn worked w/o any problems.
         b, seq_len, embed_dim = x.size()
         assert embed_dim == self.embed_dim
 
