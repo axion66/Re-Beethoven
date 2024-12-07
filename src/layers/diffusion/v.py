@@ -54,8 +54,10 @@ class Denoiser(nn.Module):
         sigmas = sigmas[:, None, None]
         noise = torch.randn_like(x)
         noised_inputs = x * alphas + noise * sigmas
-        return self.model(noised_inputs, t)
-    
+        out = self.model(noised_inputs, t)
+        #targets = noise * alphas - x * sigmas
+        denoised = x * alphas - out
+        return denoised        
         
 
     def get_alphas_sigmas(self, t):
@@ -86,9 +88,8 @@ class Denoiser(nn.Module):
         """Draws samples from a model given starting noise. v-diffusion"""
         x = torch.randn((num_samples, self.config['seq_len']), device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
         steps = 60
-        eta = 0 # 0 for DDIM, 1 for DDPM. 
+        eta = 0  
         ts = x.new_ones([x.shape[0]])
-
         t = torch.linspace(1, 0, steps + 1)[:-1]
 
         alphas, sigmas = self.get_alphas_sigmas(t)

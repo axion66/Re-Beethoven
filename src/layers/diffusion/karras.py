@@ -7,6 +7,7 @@ import math
 # Karras et al. https://arxiv.org/pdf/2206.00364 implementation
 from tqdm import trange
 
+    # Somewhat not working
 class Denoiser(nn.Module):
     # mostly from https://github.com/crowsonkb/k-diffusion/blob/master/k_diffusion/layers.py
     # also from https://github.com/Stability-AI/stable-audio-tools/blob/main/stable_audio_tools/inference/sampling.py#L179
