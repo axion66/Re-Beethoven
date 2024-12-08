@@ -133,6 +133,8 @@ class Trainer:
                     loss = self.denoiser.loss_fn(x)
                 
                 scaler.scale(loss).backward()
+                scaler.unscale_(self.optim)
+                torch.nn.utils.clip_grad_norm_(self.denoiser.parameters(), max_norm = 0.9)
                 scaler.step(self.optim)
                 scaler.update()
 
