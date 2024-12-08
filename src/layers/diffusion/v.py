@@ -36,41 +36,30 @@ class Denoiser(nn.Module):
         self.s_tmin = s_tmin
         self.s_tmax = s_tmax
         self.s_noise = s_noise
-        self.sigma_noise = lambda num_samples: (torch.randn((num_samples, 1), device = device) * 1.2 - 1.2).exp()
+
         self.mse = nn.MSELoss()
-        self.rng = torch.quasirandom.SobolEngine(1, scramble=True) # for DDPM
+        self.rng = torch.quasirandom.SobolEngine(1, scramble=True) 
 
-
-
-    
-    def forward(self, x: Tensor, sigmas = None) -> Tensor:
-        t = self.rng.draw(x.shape[0])[:, 0].to(self.device)
-        # Calculate the noise schedule parameters for those timesteps
+    def forward(self, x: Tensor) -> Tensor:
+        t = self.rng.draw(x.shape[0])[:, None].to(self.device)
         alphas, sigmas = self.get_alphas_sigmas(t)
-
-        # Combine the ground truth data and the noise
         alphas = alphas[:, None]
         sigmas = sigmas[:, None]
         noise = torch.randn_like(x)
         noised_inputs = x * alphas + noise * sigmas
         out = self.model(noised_inputs, t)
-        #targets = noise * alphas - x * sigmas
-        denoised = x * alphas - out
-        return denoised, t      
+
+        return (out - noise * alphas) / -sigmas, t      
         
 
     def get_alphas_sigmas(self, t):
-        """Returns the scaling factors for the clean image (alpha) and for the
-        noise (sigma), given a timestep."""
+
         return torch.cos(t * math.pi / 2), torch.sin(t * math.pi / 2)
 
 
     def loss_fn(self, x:Tensor):
-        t = self.rng.draw(x.shape[0])[:, 0].to(self.device) # it will only as a biased uniform distribution
-        # Calculate the noise schedule parameters for those timesteps
+        t = self.rng.draw(x.shape[0])[:, None].to(self.device) 
         alphas, sigmas = self.get_alphas_sigmas(t)
-
-        # Combine the ground truth data and the noise
         alphas = alphas[:, None]
         sigmas = sigmas[:, None]
         noise = torch.randn_like(x)
@@ -84,7 +73,7 @@ class Denoiser(nn.Module):
     def sample(self, num_samples):
         """Draws samples from a model given starting noise. v-diffusion"""
         x = torch.randn((num_samples, self.config['seq_len']), device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
-        steps = 40
+        steps = 100
         eta = 0  
         ts = x.new_ones([x.shape[0]])
         t = torch.linspace(1, 0, steps + 1)[:-1]
