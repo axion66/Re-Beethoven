@@ -199,11 +199,11 @@ class Trainer:
                     self.net.train()
 
                     for name, module in self.net.named_modules():
-                        if hasattr(module, 'weight') and module.weight.grad is not None:
-                            wandb.log({f"gradients/{name}.weight": wandb.Histogram(module.weight.grad.cpu().numpy())})
-                        if hasattr(module, 'bias') and module.bias is not None and module.bias.grad is not None:
-                            wandb.log({f"gradients/{name}.bias": wandb.Histogram(module.bias.grad.cpu().numpy())})
-    
+                            if hasattr(module, 'weight') and module.weight is not None and hasattr(module.weight, "grad"):
+                                wandb.log({f"gradients/{name}.weight": wandb.Histogram(module.weight.grad.cpu().numpy())})
+                            if hasattr(module, 'bias') and module.bias is not None and hasattr(module.bias, "grad"):                   
+                                wandb.log({f"gradients/{name}.bias": wandb.Histogram(module.bias.grad.cpu().numpy())})
+                           
 
                     
                 

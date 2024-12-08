@@ -246,10 +246,8 @@ class AudioAutoencoder(nn.Module):
         info = {}
         mean, std = audio.mean(dim = -1, keepdim = True), audio.std(dim = -1, keepdim = True)
         audio = (audio - mean) / std
-        
         while (audio.dim() != 3):
             audio = audio.unsqueeze(1) if audio.dim() < 3 else audio.squeeze(1)
-            
         latents = self.encoder(audio)
 
         latents, bottleneck_info = self.bottleneck.encode(latents, return_info=True, **kwargs)
@@ -432,6 +430,8 @@ class AutoEncoderWrapper(nn.Module):
         The chunk_size vs memory tradeoff isn't linear, and possibly depends on the GPU and CUDA version
         For example, on a A6000 chunk_size 128 is overall faster than 256 and 512 even though it has more chunks
         '''
+        print(audio.shape)
+        audio = audio.unsqueeze(1)
         if not chunked:
             # default behavior. Encode the entire audio in parallel
             return self.encode(audio)

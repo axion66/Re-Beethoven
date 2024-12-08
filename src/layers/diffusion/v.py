@@ -41,15 +41,15 @@ class Denoiser(nn.Module):
         self.rng = torch.quasirandom.SobolEngine(1, scramble=True) 
 
     def forward(self, x: Tensor) -> Tensor:
-        t = self.rng.draw(x.shape[0])[:, None].to(self.device)
+        t = self.rng.draw(x.shape[0])[:, 0].to(self.device)
         alphas, sigmas = self.get_alphas_sigmas(t)
         alphas = alphas[:, None]
         sigmas = sigmas[:, None]
         noise = torch.randn_like(x)
         noised_inputs = x * alphas + noise * sigmas
-        out = self.model(noised_inputs, t)
+        out = self.model(noised_inputs, t.unsqueeze(-1))
 
-        return (out - noise * alphas) / -sigmas, t      
+        return x * alphas - out * sigmas, t      
         
 
     def get_alphas_sigmas(self, t):
@@ -58,7 +58,7 @@ class Denoiser(nn.Module):
 
 
     def loss_fn(self, x:Tensor):
-        t = self.rng.draw(x.shape[0])[:, None].to(self.device) 
+        t = self.rng.draw(x.shape[0])[:, 0].to(self.device) 
         alphas, sigmas = self.get_alphas_sigmas(t)
         alphas = alphas[:, None]
         sigmas = sigmas[:, None]
@@ -79,7 +79,6 @@ class Denoiser(nn.Module):
         t = torch.linspace(1, 0, steps + 1)[:-1]
 
         alphas, sigmas = self.get_alphas_sigmas(t)
-
         # The sampling loop
         for i in trange(steps):
 
