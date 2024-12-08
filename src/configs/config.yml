@@ -23,9 +23,11 @@ model:
   num_workers: 28
   evaluation_cycle: 5000
   num_samples: 4
-  pretrained_autoencoder: "../models/last.pth"
+  pretrained_autoencoder: "../models/pretrained_autoencoder/last.pth"
   freeze_encoder: True
   freeze_decoder: True
+  resume_diffusion: True
+  resume_diffusion_path: "../models/pretrained_diffusion/v_diffusionDec8.pth"
 file:
   audio_folder: "../dataset"
   log_dir: "../train_log/"

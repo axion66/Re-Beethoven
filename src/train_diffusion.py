@@ -57,7 +57,11 @@ class Trainer:
             sigma_data = 0.5,
             device = torch.device(self.MODEL_CFG['device'])
         ).to(self.MODEL_CFG['device'])
-    
+
+        if (self.MODEL_CFG['resume_diffusion']):
+            state = torch.load(self.MODEL_CFG['resume_diffusion_path'])
+            self.denoiser.load_state_dict(state, strict = True)
+            
         print_model_size("Autoencoder", self.autoencoder)
         print_model_size("DiT", self.dit)
         print_model_size("Denoiser", self.denoiser)
