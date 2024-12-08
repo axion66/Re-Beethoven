@@ -174,6 +174,13 @@ class Trainer:
                             epoch = epoch,
                         )
 
+                        for name, module in self.denoiser.model.dit.named_modules():
+                            if hasattr(module, 'weight') and module.weight.grad is not None:
+                                wandb.log({f"gradients/{name}.weight": wandb.Histogram(module.weight.grad.cpu().numpy())})
+                            if hasattr(module, 'bias') and module.bias is not None and module.bias.grad is not None:
+                                wandb.log({f"gradients/{name}.bias": wandb.Histogram(module.bias.grad.cpu().numpy())})
+        
+
     @torch.no_grad()  
     def generate_samples(
             self,

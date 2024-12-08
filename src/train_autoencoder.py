@@ -197,14 +197,15 @@ class Trainer:
                         torch.save(self.net.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
                         print(f"Best model saved at {LOG_DIR}/best_model.pth")
                     self.net.train()
-    
-                if ((step) % 1000 == 0):
+
                     for name, module in self.net.named_modules():
                         if hasattr(module, 'weight') and module.weight.grad is not None:
                             wandb.log({f"gradients/{name}.weight": wandb.Histogram(module.weight.grad.cpu().numpy())})
                         if hasattr(module, 'bias') and module.bias is not None and module.bias.grad is not None:
                             wandb.log({f"gradients/{name}.bias": wandb.Histogram(module.bias.grad.cpu().numpy())})
     
+
+                    
                 
             wandb.log({"Average Generator Loss": sum(epochloss) / len(epochloss)})
             print(f"Epoch {epoch+1}/{EPOCH}, Average Generator Loss: {sum(epochloss) / len(epochloss)}")
