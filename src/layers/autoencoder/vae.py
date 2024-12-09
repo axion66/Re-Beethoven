@@ -431,7 +431,6 @@ class AutoEncoderWrapper(nn.Module):
         The chunk_size vs memory tradeoff isn't linear, and possibly depends on the GPU and CUDA version
         For example, on a A6000 chunk_size 128 is overall faster than 256 and 512 even though it has more chunks
         '''
-        print(audio.shape)
         audio = audio.unsqueeze(1)
         if not chunked:
             # default behavior. Encode the entire audio in parallel

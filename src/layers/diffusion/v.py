@@ -16,7 +16,7 @@ class Denoiser(nn.Module):
         model: nn.Module,
         sigma_data: float = 0.5,  
         sigma_min : float = 0.002,
-        sigma_max : float = 1.0,
+        sigma_max : float = 80.0,
         rho: float = 7.0, 
         s_churn: float = 40.0, 
         s_tmin: float = 0.05, 
@@ -41,15 +41,21 @@ class Denoiser(nn.Module):
         self.rng = torch.quasirandom.SobolEngine(1, scramble=True) 
 
     def forward(self, x: Tensor) -> Tensor:
+        with torch.no_grad():
+            x = self.model.autoencoder.encode_audio(x)
+        x_std = x.std(dim=1,keepdim=True)
+        x /= x_std
         t = self.rng.draw(x.shape[0])[:, 0].to(self.device)
         alphas, sigmas = self.get_alphas_sigmas(t)
-        alphas = alphas[:, None]
-        sigmas = sigmas[:, None]
+        alphas = alphas[:, None, None]
+        sigmas = sigmas[:, None, None]
         noise = torch.randn_like(x)
         noised_inputs = x * alphas + noise * sigmas
-        out = self.model(noised_inputs, t.unsqueeze(-1))
-
-        return x * alphas - out * sigmas, t      
+        v = self.model.forward_latent(noised_inputs, t.unsqueeze(-1))
+        pred = x * alphas - v * sigmas
+        pred *= x_std
+        
+        return self.model.autoencoder.decode_audio(pred), t      
         
 
     def get_alphas_sigmas(self, t):
@@ -58,14 +64,17 @@ class Denoiser(nn.Module):
 
 
     def loss_fn(self, x:Tensor):
+        with torch.no_grad():
+            x = self.model.autoencoder.encode_audio(x)
+        x /= x.std(dim=1, keepdim=True)
         t = self.rng.draw(x.shape[0])[:, 0].to(self.device) 
         alphas, sigmas = self.get_alphas_sigmas(t)
-        alphas = alphas[:, None]
-        sigmas = sigmas[:, None]
+        alphas = alphas[:, None, None]
+        sigmas = sigmas[:, None, None]
         noise = torch.randn_like(x)
         noised_inputs = x * alphas + noise * sigmas
         targets = noise * alphas - x * sigmas
-        out = self.model(noised_inputs, t)
+        out = self.model.forward_latent(noised_inputs, t)
         return self.mse(out, targets)
      
 
@@ -73,7 +82,9 @@ class Denoiser(nn.Module):
     def sample(self, num_samples):
         """Draws samples from a model given starting noise. v-diffusion"""
         x = torch.randn((num_samples, self.config['seq_len']), device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
-        steps = 100
+        x = self.model.autoencoder.encode_audio(x)
+        x = torch.randn_like(x, device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+        steps = 250
         eta = 0  
         ts = x.new_ones([x.shape[0]])
         t = torch.linspace(1, 0, steps + 1)[:-1]
@@ -84,7 +95,7 @@ class Denoiser(nn.Module):
 
             # Get the model output (v, the predicted velocity)
             with torch.amp.autocast(device_type = "cuda" if torch.cuda.is_available() else "cpu"):
-                v = self.model(x, ts * t[i]).float()
+                v = self.model.forward_latent(x, ts * t[i]).float()
 
             # Predict the noise and the denoised image
             pred = x * alphas[i] - v * sigmas[i]
@@ -109,6 +120,6 @@ class Denoiser(nn.Module):
 
     
         # If we are on the last timestep, output the denoised image
-        return pred
+        return self.model.autoencoder.decode_audio(pred).float()
 
     
