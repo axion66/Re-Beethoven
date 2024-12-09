@@ -17,7 +17,7 @@ class Denoiser(nn.Module):
         model: nn.Module = DiT(),
         sigma_data: float = 1,  
         sigma_min : float = 1e-2,
-        sigma_max : float = 80.0,
+        sigma_max : float = 5.0,
         rho: float = 7.0, 
         s_churn: float = 0.0, 
         s_tmin: float = 0.05, 
@@ -61,16 +61,20 @@ class Denoiser(nn.Module):
     def forward(self, x : Tensor, sigmas = None) -> Tensor:
         
         x = self.model.autoencoder.encode_audio(x)  # audio -> latent
+        x_std = x.std(dim=1,keepdim=True)
+        x /= x_std
         sigmas = self.sigma_noise(x.shape[0]) if sigmas is None else sigmas
         
         c_skip, c_out, c_in, c_noise = [self.append_dims(cond, x.ndim) for cond in self.get_scalings(sigmas)]
         x_denoised = self.model.forward_latent(c_in *  x, c_noise) * c_out + c_skip * x
-
+        
         #x_denoised = self.model.autoencoder.decode_audio(x_denoised)
-        return x_denoised, sigmas
+        return x_denoised * x_std, sigmas
 
     def loss_fn(self, x : Tensor, sigmas = None):
         x = self.model.autoencoder.encode_audio(x)  # audio -> latent
+        x_std_chn = x.std(dim=1, keepdim=True)
+        x /= x_std_chn
         sigmas = self.sigma_noise(x.shape[0]) if sigmas is None else sigmas
 
 
