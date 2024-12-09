@@ -60,17 +60,22 @@ class DiT(nn.Module):
         '''
 
         
-        l = self.autoencoder.encode(x)
+        l = self.autoencoder.encode_audio(x)
 
+        l = self.forward_latent(l, sigmas)
+
+        x = self.autoencoder.decode_audio(l)
+        
+        return x
+
+
+    def forward_latent(self, l, sigmas):
         l = l.transpose(-1, -2)
 
         l = self.dit(l, self.sigma_transform(sigmas))
 
         l = l.transpose(-1, -2)
-
-        x = self.autoencoder.decode(l)
-        
-        return x
+        return l
     
 
 

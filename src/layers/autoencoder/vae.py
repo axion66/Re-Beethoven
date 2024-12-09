@@ -115,7 +115,8 @@ class OobleckEncoder(nn.Module):
         layers += [
             get_activation_fn("snake", in_chn=c_mults[-1] * channels),
             nn.Conv1d(in_channels=c_mults[-1]*channels, out_channels=latent_dim, kernel_size=3, padding=1)
-        ]   
+        ] 
+        
         self.latent_dim = latent_dim
         self.layers = nn.Sequential(*layers)
 
