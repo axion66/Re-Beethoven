@@ -39,7 +39,7 @@ class Denoiser(nn.Module):
 
         self.mse = nn.MSELoss()
         self.rng = torch.quasirandom.SobolEngine(1, scramble=True) 
-
+    
     def forward(self, x: Tensor) -> Tensor:
         with torch.no_grad():
             x = self.model.autoencoder.encode_audio(x)
@@ -61,8 +61,10 @@ class Denoiser(nn.Module):
     def get_alphas_sigmas(self, t):
 
         return torch.cos(t * math.pi / 2), torch.sin(t * math.pi / 2)
-
-
+        # range given t:[0, 1], [1 -> 0], [0, -> 1]
+        # since in x * alphas + noise * sigmas,
+        # noise is N(0, 1), so x also should be N(0, 1), or normalized into [-1, 1].
+ 
     def loss_fn(self, x:Tensor):
         with torch.no_grad():
             x = self.model.autoencoder.encode_audio(x)
