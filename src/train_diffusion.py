@@ -15,8 +15,8 @@ import pytorch_warmup as warmup
 from layers.cores.dit import DiT
 from layers.autoencoder.vae import AutoEncoderWrapper,AudioAutoencoder
 from layers.tools.losses import *
-
-
+from aeiou.viz import audio_spectrogram_image
+import torchaudio
 def print_model_size(name, model):
     for name, param in model.named_parameters():
         print(f"Layer: {name} | Size: {param.size()}") 
@@ -134,7 +134,7 @@ class Trainer:
                 
                 scaler.scale(loss).backward()
                 scaler.unscale_(self.optim)
-                torch.nn.utils.clip_grad_norm_(self.denoiser.parameters(), max_norm = 0.9)
+                torch.nn.utils.clip_grad_norm_(self.denoiser.parameters(), max_norm = 1.0)
                 scaler.step(self.optim)
                 scaler.update()
 
@@ -142,7 +142,11 @@ class Trainer:
                     if self.warmup_schedule.last_step + 1 >= self.MODEL_CFG['warmup_period']:
                         self.lr_schedule.step()
 
-                wandb.log({"loss/train": loss.item(), "lr": self.optim.param_groups[0]['lr']})
+                wandb.log({
+                    "train/loss": loss.item(), 
+                    "train/lr": self.optim.param_groups[0]['lr'], 
+                    "train/std": x.std()
+                })
                 
 
 
@@ -150,52 +154,36 @@ class Trainer:
                 if step % eval_step == 0:
                     with torch.no_grad():
                         sum_loss = 0.0
-                        FAKE_DIR = os.path.join(self.SAMPLE_DIR, f"generated_epoch_{epoch+1}")
-                        ORIG_DIR = os.path.join(self.SAMPLE_DIR, f"original_epoch_{epoch+1}")
-                        os.makedirs(FAKE_DIR, exist_ok = True)
-                        os.makedirs(ORIG_DIR, exist_ok = True)
+                    
                         for x in self.test_loader:
                             x = x[0].to(self.MODEL_CFG['device']) 
                             with torch.autocast(device_type = "cuda" if torch.cuda.is_available() else "cpu", dtype = torch.float16):
                                 loss = self.denoiser.loss_fn(x)
-                                decoded, sigmas = self.denoiser(x)
-                            wandb.log({"loss/evaluation": loss})
                             sum_loss += loss
-                            self.generate_samples(decoded,output_dir=FAKE_DIR, name="denoised")
-                            self.generate_samples(x, output_dir=ORIG_DIR, name="real")
-
+                            wandb.log({
+                                "test/loss": loss,
+                                "test/lr": self.optim.param_groups[0]['lr'],
+                                "test/std": x.std()
+                            })
                         
-                        wandb.log({"loss/evaluation_mean": sum_loss})
-                        if sum_loss < self.best_eval_loss:
-                            self.best_eval_loss = sum_loss
-                            torch.save(self.denoiser.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
-                            print(f"Best Model saved at epoch {epoch}")
-                            
+                        
                         self.sample(
                             num_samples = self.MODEL_CFG['num_samples'],
                             epoch = epoch,
                         )
 
-                        for name, module in self.denoiser.model.dit.named_modules():
-                            if hasattr(module, 'weight') and module.weight is not None and hasattr(module.weight, "grad"):
-                                wandb.log({f"gradients/{name}.weight": wandb.Histogram(module.weight.grad.cpu().numpy())})
-                            if hasattr(module, 'bias') and module.bias is not None and hasattr(module.bias, "grad"):                   
-                                wandb.log({f"gradients/{name}.bias": wandb.Histogram(module.bias.grad.cpu().numpy())})
-                            
+                        if sum_loss < self.best_eval_loss:
+                            self.best_eval_loss = sum_loss
+                            torch.save(self.denoiser.state_dict(), os.path.join(LOG_DIR, 'best.pth'))
+                            print(f"Best Model saved at epoch {epoch}")
 
-    @torch.no_grad()  
-    def generate_samples(
-            self,
-            x,
-            output_dir: str,
-            name: str,
-        ) -> None:
-        x = x.cpu()
-        for i in range(x.size(0)):
-            sample = x[i].numpy().flatten()
-            filename = os.path.join(output_dir, f"{name}_{i}.wav")
-            sf.write(filename, sample, self.FFT_CFG['sr'])
-            wandb.log({f"{name}/Sample {i}": wandb.Audio(sample, sample_rate=self.FFT_CFG['sr'])})
+                        if step % (3 * eval_step) == 0:
+                            for name, module in self.denoiser.model.dit.named_modules():
+                                if hasattr(module, 'weight') and module.weight is not None and hasattr(module.weight, "grad"):
+                                    wandb.log({f"gradients/{name}.weight": wandb.Histogram(module.weight.grad.cpu().numpy())})
+                                if hasattr(module, 'bias') and module.bias is not None and hasattr(module.bias, "grad"):                   
+                                    wandb.log({f"gradients/{name}.bias": wandb.Histogram(module.bias.grad.cpu().numpy())})
+                                
 
 
     @torch.no_grad()
@@ -204,18 +192,15 @@ class Trainer:
             num_samples: int,
             epoch: int,
         ) -> None:
-
-        STORE_SAMPLE_DIR = os.path.join(self.SAMPLE_DIR, f"Epoch_{epoch+1}")
-        os.makedirs(STORE_SAMPLE_DIR, exist_ok=True)
-
-        generated_samples = self.denoiser.sample(num_samples).cpu()
-
-        for i in range(num_samples):
-            sample = generated_samples[i].numpy().flatten()
-            filename = os.path.join(STORE_SAMPLE_DIR, f"{i}.wav")
-            sf.write(filename, sample, self.FFT_CFG['sr'])
-            wandb.log({f"samples/{i}": wandb.Audio(sample, sample_rate=self.FFT_CFG['sr'])})
-            
+        sr = self.FFT_CFG['sr']
+        s = self.denoiser.sample(num_samples).reshape(1,-1).to(torch.float32).div(torch.max(torch.abs(s))).mul(32767).to(torch.int16).cpu()
+        torchaudio.save(os.path.join(self.SAMPLE_DIR, f"demo_{epoch}.wav"), s, sr)
+        wandb.log({
+            f"demo/sampled": wandb.Audio(s, sr, "reconstructed"),
+            f"demo/spectrogram": wandb.Image(audio_spectrogram_image(s))
+        })
+        del s
+        
  
 
 if __name__ == "__main__":

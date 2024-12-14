@@ -26,8 +26,8 @@ model:
   pretrained_autoencoder: "../models/pretrained_autoencoder/last.pth"
   freeze_encoder: True
   freeze_decoder: True
-  resume_diffusion: True
-  resume_diffusion_path: "../models/pretrained_diffusion/50.pth"
+  resume_diffusion: False
+  resume_diffusion_path: "../models/pretrained_diffusion/v_diffusionDec8.pth"
 file:
   audio_folder: "../dataset"
   log_dir: "../train_log/"
