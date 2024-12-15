@@ -7,7 +7,6 @@ from torch.optim import AdamW
 from layers.preprocess import load_files, create_overlapping_chunks_tensor
 from torch.utils.data import TensorDataset, DataLoader
 from datetime import datetime
-import soundfile as sf  
 from tqdm import tqdm
 import wandb
 import argparse
@@ -17,6 +16,7 @@ from layers.autoencoder.vae import AutoEncoderWrapper,AudioAutoencoder
 from layers.tools.losses import *
 from aeiou.viz import audio_spectrogram_image
 import torchaudio
+import soundfile as sf
 def print_model_size(name, model):
     for name, param in model.named_parameters():
         print(f"Layer: {name} | Size: {param.size()}") 
@@ -130,7 +130,7 @@ class Trainer:
 
                 x = x[0].to(self.MODEL_CFG['device'])
                 with torch.autocast(device_type = "cuda" if torch.cuda.is_available() else "cpu", dtype = torch.float16):
-                    loss = self.denoiser.loss_fn(x)
+                    loss, latent_std, latent_mean, scaled_latent_std = self.denoiser.loss_fn(x)
                 
                 scaler.scale(loss).backward()
                 scaler.unscale_(self.optim)
@@ -145,7 +145,11 @@ class Trainer:
                 wandb.log({
                     "train/loss": loss.item(), 
                     "train/lr": self.optim.param_groups[0]['lr'], 
-                    "train/std": x.std()
+                    "train/std": x.std(),
+                    "train/mean": x.mean(),
+                    "train/latent_std": latent_std,
+                    "train/latent_mean": latent_mean,
+                    "train/scaled_latent_std": scaled_latent_std
                 })
                 
 
@@ -158,12 +162,16 @@ class Trainer:
                         for x in self.test_loader:
                             x = x[0].to(self.MODEL_CFG['device']) 
                             with torch.autocast(device_type = "cuda" if torch.cuda.is_available() else "cpu", dtype = torch.float16):
-                                loss = self.denoiser.loss_fn(x)
+                                loss, latent_std, latent_mean, scaled_latent_mean = self.denoiser.loss_fn(x)
                             sum_loss += loss
                             wandb.log({
                                 "test/loss": loss,
                                 "test/lr": self.optim.param_groups[0]['lr'],
-                                "test/std": x.std()
+                                "test/std": x.std(),
+                                "test/mean": x.mean(),
+                                "test/latent_std": latent_std,
+                                "test/latent_mean": latent_mean,
+                                "test/scaled_latent_mean": scaled_latent_mean
                             })
                         
                         
@@ -193,10 +201,12 @@ class Trainer:
             epoch: int,
         ) -> None:
         sr = self.FFT_CFG['sr']
-        s = self.denoiser.sample(num_samples).reshape(1,-1).to(torch.float32).div(torch.max(torch.abs(s))).mul(32767).to(torch.int16).cpu()
-        torchaudio.save(os.path.join(self.SAMPLE_DIR, f"demo_{epoch}.wav"), s, sr)
+        s = self.denoiser.sample(num_samples).reshape(1,-1)
+        s = s.to(torch.float32).div(torch.max(torch.abs(s))).mul(32767).to(torch.int16).cpu()
+        f = os.path.join(self.SAMPLE_DIR, f"demo_{epoch}.wav")
+        torchaudio.save(f, s, sr)
         wandb.log({
-            f"demo/sampled": wandb.Audio(s, sr, "reconstructed"),
+            f"demo/sampled": wandb.Audio(f, sr, "reconstructed"),
             f"demo/spectrogram": wandb.Image(audio_spectrogram_image(s))
         })
         del s
