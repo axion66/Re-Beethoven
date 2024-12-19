@@ -3,7 +3,7 @@ import yaml
 import torch
 import torch.nn as nn
 from torch.optim import AdamW,Adam
-from layers.preprocess import load_mp3_files, create_overlapping_chunks_tensor
+from layers.preprocess import load_files, create_overlapping_chunks_tensor
 from torch.utils.data import TensorDataset, DataLoader
 from datetime import datetime
 import soundfile as sf  
