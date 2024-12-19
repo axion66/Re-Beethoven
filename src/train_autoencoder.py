@@ -74,7 +74,7 @@ class Trainer:
 
     
     def configure_loader(self):
-        tensors = load_mp3_files(base_folder=self.FILE_CFG['audio_folder'], config=self.FFT_CFG)
+        tensors = load_files(base_folder=self.FILE_CFG['audio_folder'], config=self.FFT_CFG)
         tensors = torch.cat(tensors, dim=-1)
 
         x = create_overlapping_chunks_tensor(sequence=tensors, config=self.FFT_CFG)
