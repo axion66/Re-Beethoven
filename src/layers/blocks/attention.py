@@ -30,6 +30,65 @@ class TimestepBlock(nn.Module):
         Apply the module to `x` given `emb` timestep embeddings.
         """
 
+class DiTBlock(TimestepBlock):
+    def __init__(
+        self,
+        num_blocks,
+        latents_dim,
+        embed_dim,
+        num_heads,
+        norm_fn=None,
+        p=0.1,
+    ):
+        super().__init__()
+        self.latents_dim = latents_dim
+        self.embed_dim = embed_dim
+
+        
+
+
+        #   initial layer (latent_dim -> embed_dim)
+        self.latents2embed = nn.Sequential(
+            Linear(self.latents_dim, self.embed_dim),
+            Rearrange('b l c -> b c l'),
+            SnakeBeta(in_features = self.embed_dim),
+            Rearrange('b c l -> b l c'),
+            Linear(self.embed_dim, self.embed_dim),
+        )
+
+        #   dit
+        self.transformer = nn.ModuleList(
+            [
+                TransformerBlock(
+                              embed_dim = self.embed_dim,
+                              depth = i + 1,
+                              num_heads = num_heads,
+                              norm_fn = norm_fn,
+                              p = p,
+                            ) 
+                for i in range(num_blocks)
+            ]
+        )
+
+        #   final layer (embed_dim -> latent_dim)
+        self.final_norm = nn.LayerNorm(self.embed_dim, elementwise_affine=False, eps = 1e-6)
+        self.adaLN_modulation = nn.Linear(self.embed_dim, 2 * self.embed_dim, bias = True)
+        self.final_linear = nn.Linear(self.embed_dim, self.latents_dim, bias = True)
+        nn.init.zeros_(self.adaLN_modulation.weight)
+        nn.init.zeros_(self.adaLN_modulation.bias)
+
+    
+    def forward(self, x, emb):
+        x = self.latents2embed(x)
+
+        for block in self.transformer:
+            x = block(x, emb)
+
+
+        scale, shift = self.adaLN_modulation(emb).unsqueeze(1).chunk(2, dim = -1)
+        x = self.final_norm(x) * (1 + scale) + shift
+        x = self.final_linear(x)
+        return x
 
 class TransformerBlock(TimestepBlock):
 
@@ -60,7 +119,7 @@ class TransformerBlock(TimestepBlock):
         self.ff = nn.Sequential(
             nn.Linear(embed_dim,embed_dim*4),
             Rearrange('b l c -> b c l'),
-            SnakeBeta(in_features=embed_dim*4),
+            SnakeBeta(in_features = embed_dim*4),
             Rearrange('b c l -> b l c'),
             nn.Linear(embed_dim*4,embed_dim)
         )
@@ -68,29 +127,10 @@ class TransformerBlock(TimestepBlock):
         self.set_adaLN(embed_dim)  
         
     def set_adaLN(self, embed_dim):
-        #   AdaLN-zero
-        self.gamma_1 = nn.Linear(embed_dim, embed_dim, bias=True)
-        self.beta_1 = nn.Linear(embed_dim, embed_dim, bias=True)
-        self.gamma_2 = nn.Linear(embed_dim, embed_dim, bias=True)
-        self.beta_2 = nn.Linear(embed_dim, embed_dim, bias=True)
-        self.scale_1 = nn.Linear(embed_dim, embed_dim, bias=True)
-        self.scale_2 = nn.Linear(embed_dim, embed_dim, bias=True)
+        self.adaln = nn.Linear(embed_dim, embed_dim * 6, bias=True)
+        nn.init.zeros_(self.adaln.weight)
+        nn.init.zeros_(self.adaln.bias)
 
-        nn.init.zeros_(self.gamma_1.weight)
-        nn.init.zeros_(self.beta_1.weight)
-        nn.init.zeros_(self.gamma_1.bias)
-        nn.init.zeros_(self.beta_1.bias)  
-
-        nn.init.zeros_(self.gamma_2.weight)
-        nn.init.zeros_(self.beta_2.weight)
-        nn.init.zeros_(self.gamma_2.bias)
-        nn.init.zeros_(self.beta_2.bias)  
-
-        nn.init.zeros_(self.scale_1.weight)
-        nn.init.zeros_(self.scale_2.weight)
-        nn.init.zeros_(self.scale_1.bias)
-        nn.init.zeros_(self.scale_2.bias)
-        
     def forward(self, x, emb):
         '''
         Get x: [batch,seq,embed_dim]
@@ -99,19 +139,15 @@ class TransformerBlock(TimestepBlock):
         
             Pre Normalization, but no Post Normalization being applied.
         '''
-        # UPDATE Nov 24: Use adaLN-zero instead of adding sigmas.
-        scale_msa = self.gamma_1(emb).unsqueeze(1)
-        shift_msa = self.beta_1(emb).unsqueeze(1)
-        scale_mlp = self.gamma_2(emb).unsqueeze(1)
-        shift_mlp = self.beta_2(emb).unsqueeze(1)
-        gate_msa = self.scale_1(emb).unsqueeze(1)
-        gate_mlp = self.scale_2(emb).unsqueeze(1)
+        assert emb.ndim == 2
+        scale_msa, shift_msa, scale_mlp, shift_mlp, gate_msa, gate_mlp = self.adaln(emb).unsqueeze(1).chunk(6, dim = -1)
         
+
         res = x
         x = self.norm_1(x)
         x = x * (1 + scale_msa) + shift_msa
         x = self.attn(x)
-        x = x * torch.sigmoid(1 - gate_msa) # not original adaLN-zero, but from stable audio paper.
+        x = x * torch.sigmoid(1 - gate_msa) 
         x = x + res
         
         res = x
@@ -119,7 +155,7 @@ class TransformerBlock(TimestepBlock):
         x = x * (1 + scale_mlp) + shift_mlp
         x = self.ff(x)
         x = x * torch.sigmoid(1 - gate_mlp)
-        x = x + res  
+        x = x + res
           
         return x
 
@@ -173,6 +209,7 @@ class DifferentialAttention(nn.Module):
         ):   
         # NOV 24: remove adding sigmas, 
         # but rather use adaLN-zero in transformer level.
+        # note that w/ correct implementation of DDPM, regular flash-attn worked w/o any problems.
         b, seq_len, embed_dim = x.size()
         assert embed_dim == self.embed_dim
 
@@ -180,10 +217,18 @@ class DifferentialAttention(nn.Module):
         q = q.view(b, seq_len, 2 * self.num_heads, self.head_dim)   # batch, seq_len, 2 * n, h
         k = k.view(b, seq_len, 2 * self.num_heads, self.head_dim)   # batch, seq_len, 2 * n, h
         v = v.view(b, seq_len, self.num_heads, 2, self.head_dim)    # batch, seq_len, n,  2 * h
+        #v = v.view(b, seq_len, 2 * self.num_heads, self.head_dim)
         
         q = self.rotary.rotate_queries_or_keys(q)
         k = self.rotary.rotate_queries_or_keys(k)
-
+        '''if FLASH_ON:
+            q = q.to(torch.float16)
+            k = k.to(torch.float16)
+            v = v.to(torch.float16)
+            attn = flash_attn_func(q,k,v,causal=True)
+            attn = rearrange(attn, "b l n h -> b l (n h)").float()
+            return self.out(attn)'''
+        
         q = q.reshape(b, seq_len, self.num_heads, 2, self.head_dim)
         k = k.reshape(b, seq_len, self.num_heads, 2, self.head_dim)
         

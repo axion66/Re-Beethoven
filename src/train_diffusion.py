@@ -2,12 +2,11 @@ import os
 import yaml
 import torch
 import torch.nn as nn
-from layers.diffusion.karras import Denoiser
+from layers.diffusion.v import Denoiser
 from torch.optim import AdamW
 from layers.preprocess import load_files, create_overlapping_chunks_tensor
 from torch.utils.data import TensorDataset, DataLoader
 from datetime import datetime
-import soundfile as sf  
 from tqdm import tqdm
 import wandb
 import argparse
@@ -15,8 +14,9 @@ import pytorch_warmup as warmup
 from layers.cores.dit import DiT
 from layers.autoencoder.vae import AutoEncoderWrapper,AudioAutoencoder
 from layers.tools.losses import *
-
-
+from aeiou.viz import audio_spectrogram_image
+import torchaudio
+import soundfile as sf
 def print_model_size(name, model):
     for name, param in model.named_parameters():
         print(f"Layer: {name} | Size: {param.size()}") 
@@ -34,7 +34,6 @@ class Trainer:
         self.configure_optimizer()
         self.configure_wandb()
         
-        self.best_eval_loss = 1e+7
         
     def configure_config(self, cfg_path):
         with open(cfg_path) as stream:
@@ -58,7 +57,11 @@ class Trainer:
             sigma_data = 0.5,
             device = torch.device(self.MODEL_CFG['device'])
         ).to(self.MODEL_CFG['device'])
-    
+
+        if (self.MODEL_CFG['resume_diffusion']):
+            state = torch.load(self.MODEL_CFG['resume_diffusion_path'])
+            self.denoiser.load_state_dict(state, strict = True)
+            
         print_model_size("Autoencoder", self.autoencoder)
         print_model_size("DiT", self.dit)
         print_model_size("Denoiser", self.denoiser)
@@ -92,12 +95,10 @@ class Trainer:
     def configure_optimizer(self):
         warmup_period = self.MODEL_CFG['warmup_period']
         num_steps = len(self.train_loader) * self.MODEL_CFG['epoch'] - warmup_period
-        self.optim = AdamW(self.denoiser.parameters(recurse=True), lr=self.MODEL_CFG['lr'], betas=(0.9, 0.999), weight_decay=0.01)
+        self.optim = AdamW(self.denoiser.parameters(recurse = True), lr = self.MODEL_CFG['lr'], betas = (0.9, 0.999), weight_decay=0.01)
         self.lr_schedule = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim, T_max=num_steps)
         self.warmup_schedule = warmup.ExponentialWarmup(self.optim, warmup_period)
 
-
-        
     def configure_wandb(self):
         wandb_store = os.path.join(self.FILE_CFG['log_dir'],"wandb_store")
         os.makedirs(wandb_store, exist_ok=True)
@@ -112,106 +113,109 @@ class Trainer:
             }
         )
         
-    
-            
-    
- 
     def train(self):
         
-        EPOCH = self.MODEL_CFG['epoch']
         LOG_DIR = self.FILE_CFG['log_dir']
         os.makedirs(LOG_DIR, exist_ok=True)
+        self.SAMPLE_DIR = os.path.join(LOG_DIR, "samples")
+        os.makedirs(self.SAMPLE_DIR, exist_ok=True)
+        self.best_eval_loss = 1e+7
 
-
+        step = 0
+        scaler = torch.GradScaler(device = "cuda" if torch.cuda.is_available() else "cpu")
+        eval_step = self.MODEL_CFG['evaluation_cycle']
         for epoch in range(self.MODEL_CFG['epoch']):
-            
-            EPOCH_LOSS = []
-
-            for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{EPOCH}")):
-                
-                x = x[0].to(self.MODEL_CFG['device'])
-                loss = self.denoiser.loss_fn(x)
-                
+            for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{self.MODEL_CFG['epoch']}")):
                 self.optim.zero_grad()
-                loss.backward()
-                self.optim.step()
+
+                x = x[0].to(self.MODEL_CFG['device'])
+                with torch.autocast(device_type = "cuda" if torch.cuda.is_available() else "cpu", dtype = torch.float16):
+                    loss, latent_std, latent_mean, scaled_latent_std = self.denoiser.loss_fn(x)
                 
+                scaler.scale(loss).backward()
+                scaler.unscale_(self.optim)
+                torch.nn.utils.clip_grad_norm_(self.denoiser.parameters(), max_norm = 1.0)
+                scaler.step(self.optim)
+                scaler.update()
+
                 with self.warmup_schedule.dampening():
                     if self.warmup_schedule.last_step + 1 >= self.MODEL_CFG['warmup_period']:
                         self.lr_schedule.step()
+
+                wandb.log({
+                    "train/loss": loss.item(), 
+                    "train/lr": self.optim.param_groups[0]['lr'], 
+                    "train/std": x.std(),
+                    "train/mean": x.mean(),
+                    "train/latent_std": latent_std,
+                    "train/latent_mean": latent_mean,
+                    "train/scaled_latent_std": scaled_latent_std
+                })
                 
-                # Timestamp Loss, LR
-                EPOCH_LOSS.append(loss.item())
-                wandb.log({"timestamp_loss": loss.item(), "lr": self.optim.param_groups[0]['lr']})
-
-            # Epoch Loss
-            avg_train_loss = sum(EPOCH_LOSS) / len(EPOCH_LOSS)
-            wandb.log({"train_loss": avg_train_loss})
-            print(f"Epoch {epoch+1}/{EPOCH}, Average Train Loss: {avg_train_loss:.4f}")
-
-            # Evaluation & Sampling
-            if (epoch + 1) % self.MODEL_CFG['evaluation_cycle'] == 0:
-                self.net.eval()
-                EVAL_LOSS = []
-                with torch.no_grad():
-                    for x in self.test_loader:
-                        x = x[0].to(self.MODEL_CFG['device']) # list to TEnsor
-                        loss = self.denoiser.loss_fn(x)
-                        EVAL_LOSS.append(loss.item())
-            
-                avg_eval_loss = sum(EVAL_LOSS) / len(EVAL_LOSS)
-                wandb.log({"eval_loss": avg_eval_loss})
-                print(f"Evaluation Loss: {avg_eval_loss:.4f}")
-
-                if avg_eval_loss < self.best_eval_loss:
-                    self.best_eval_loss = avg_eval_loss
-                    torch.save(self.denoiser.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
-
-                STORE_SAMPLE_DIR = os.path.join(LOG_DIR, f"samples_epoch_{epoch+1}")
-                for idx in range(self.MODEL_CFG['num_samples']):
-                    self.generate_samples(
-                        num_samples=1,#self.MODEL_CFG['num_samples'],
-                        num_steps=self.MODEL_CFG['sampling_steps'][idx],
-                        output_dir=STORE_SAMPLE_DIR,
-                        idx=idx
-                    )
-
-                for i in range(self.MODEL_CFG['num_samples']):
-                    sample_path = os.path.join(STORE_SAMPLE_DIR, f"Sample_{i}.wav")
-                    wandb.log({f"Sample {i}": wandb.Audio(sample_path, sample_rate=self.FFT_CFG['sr'])})
-                self.net.train()
-
-            
 
 
+                step += 1
+                if step % eval_step == 0:
+                    with torch.no_grad():
+                        sum_loss = 0.0
+                    
+                        for x in self.test_loader:
+                            x = x[0].to(self.MODEL_CFG['device']) 
+                            with torch.autocast(device_type = "cuda" if torch.cuda.is_available() else "cpu", dtype = torch.float16):
+                                loss, latent_std, latent_mean, scaled_latent_mean = self.denoiser.loss_fn(x)
+                            sum_loss += loss
+                            wandb.log({
+                                "test/loss": loss,
+                                "test/lr": self.optim.param_groups[0]['lr'],
+                                "test/std": x.std(),
+                                "test/mean": x.mean(),
+                                "test/latent_std": latent_std,
+                                "test/latent_mean": latent_mean,
+                                "test/scaled_latent_mean": scaled_latent_mean
+                            })
+                        
+                        
+                        self.sample(
+                            num_samples = self.MODEL_CFG['num_samples'],
+                            epoch = epoch,
+                        )
 
-    
-        
+                        if sum_loss < self.best_eval_loss:
+                            self.best_eval_loss = sum_loss
+                            torch.save(self.denoiser.state_dict(), os.path.join(LOG_DIR, 'best.pth'))
+                            print(f"Best Model saved at epoch {epoch}")
 
-    def generate_samples(
+                        if step % (3 * eval_step) == 0:
+                            for name, module in self.denoiser.model.dit.named_modules():
+                                if hasattr(module, 'weight') and module.weight is not None and hasattr(module.weight, "grad"):
+                                    wandb.log({f"gradients/{name}.weight": wandb.Histogram(module.weight.grad.cpu().numpy())})
+                                if hasattr(module, 'bias') and module.bias is not None and hasattr(module.bias, "grad"):                   
+                                    wandb.log({f"gradients/{name}.bias": wandb.Histogram(module.bias.grad.cpu().numpy())})
+                                
+
+
+    @torch.no_grad()
+    def sample(
             self,
             num_samples: int,
-            num_steps: int,
-            output_dir: str,
-            idx: int
+            epoch: int,
         ) -> None:
-        os.makedirs(output_dir, exist_ok=True)
-
-        with torch.no_grad():
-            generated_samples = self.model.sample(num_samples,num_steps)
-
-        for i in range(num_samples):
-            sample = generated_samples[i].cpu().numpy().flatten()
-            filename = os.path.join(output_dir, f"Sample_{idx}.wav")
-            sf.write(filename, sample, self.FFT_CFG['sr'])
-
-        print(f"Generated {num_samples} samples and saved to {output_dir}")    
-    
-
+        sr = self.FFT_CFG['sr']
+        s = self.denoiser.sample(num_samples).reshape(1,-1)
+        s = s.to(torch.float32).div(torch.max(torch.abs(s))).mul(32767).to(torch.int16).cpu()
+        f = os.path.join(self.SAMPLE_DIR, f"demo_{epoch}.wav")
+        torchaudio.save(f, s, sr)
+        wandb.log({
+            f"demo/sampled": wandb.Audio(f, sr, "reconstructed"),
+            f"demo/spectrogram": wandb.Image(audio_spectrogram_image(s))
+        })
+        del s
+        
+ 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("cfg_path", type=str, help="Path to the configuration YAML file")
+    parser.add_argument("cfg_path", type=str, default="configs/config.yml", help="Path to the configuration YAML file")
     args = parser.parse_args()
     
     trainer = Trainer(args.cfg_path)

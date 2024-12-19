@@ -1,6 +1,10 @@
 /src/models/*
 **/__pycache__/
 src/pretrained_models/
+models/*
+models/
+/models/
+
 /models/*
 models/
 dataset/train_data
@@ -8,3 +12,5 @@ dataset/train_labels
 dataset_test/
 src/wandb/
 src/train_log/
+
+audioset/*

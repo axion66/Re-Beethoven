@@ -5,7 +5,7 @@ import math
 import numpy as np
 import math
 from layers.tools.activations import get_activation_fn
-
+import time
 # from https://github.com/Stability-AI/stable-audio-tools/blob/main/stable_audio_tools/models/autoencoders.py and modified
 
 class TemporalResBlock(nn.Module):
@@ -115,8 +115,9 @@ class OobleckEncoder(nn.Module):
         layers += [
             get_activation_fn("snake", in_chn=c_mults[-1] * channels),
             nn.Conv1d(in_channels=c_mults[-1]*channels, out_channels=latent_dim, kernel_size=3, padding=1)
-        ]
-
+        ] 
+        
+        self.latent_dim = latent_dim
         self.layers = nn.Sequential(*layers)
 
     def forward(self, x):
@@ -154,7 +155,7 @@ class OobleckDecoder(nn.Module):
             get_activation_fn("snake", in_chn=c_mults[0] * channels),
             nn.Conv1d(in_channels=c_mults[0] * channels, out_channels=out_channels, kernel_size=7, padding=3, bias=False),
         ]
-
+        self.latent_dim = latent_dim
         self.layers = nn.Sequential(*layers)
 
     def forward(self, x):
@@ -242,12 +243,12 @@ class AudioAutoencoder(nn.Module):
 
  
 
-    def encode(self, audio, return_info=False, **kwargs):
-
+    def encode(self, audio :torch.Tensor, return_info=False, **kwargs):
         info = {}
+        mean, std = audio.mean(dim = -1, keepdim = True), audio.std(dim = -1, keepdim = True)
+        audio = (audio - mean) / std
         while (audio.dim() != 3):
             audio = audio.unsqueeze(1) if audio.dim() < 3 else audio.squeeze(1)
-            
         latents = self.encoder(audio)
 
         latents, bottleneck_info = self.bottleneck.encode(latents, return_info=True, **kwargs)
@@ -393,18 +394,22 @@ class AutoEncoderWrapper(nn.Module):
         if (autoencoder_state_path is not None):
             if torch.cuda.is_available():
                 print("Loaded Pretrained autoencoder. (CUDA)")
-                self.ae.state_dict(torch.load(autoencoder_state_path))
+                self.ae.load_state_dict(torch.load(autoencoder_state_path))
             else:
                 print("Loaded Pretrained autoencoder. (CPU)")
-                self.ae.state_dict(torch.load(autoencoder_state_path,map_location='cpu'))
+                self.ae.load_state_dict(torch.load(autoencoder_state_path, map_location='cpu'))
         else:
             print("Pretrained autoencoder not found. It is recommended to use pretrained autoencoder.")
-            
+
+        self.freeze_encoder()
+        self.freeze_decoder()
+        
     @torch.no_grad()
     def get_latents_shape(self, example):
-        bs, chn, seq = self.ae.encode(example).shape
-        return bs, chn, seq # for 1, 16384, we have 1, 64, 4
-    
+        t_a = time.time()
+        bs, chn, seq = self.encode_audio(example).shape
+        print(f"Took {time.time() - t_a} seconds to handle {example.shape} tensor")
+        return bs, chn, seq     # for 1, 16384, we have 1, 64, 4
     
     def encode(self, x):
         return self.ae.encode(x)
@@ -412,19 +417,150 @@ class AutoEncoderWrapper(nn.Module):
     def decode(self, x):
         return self.ae.decode(x)
     
+    def encode_audio(self, audio, chunked=False, overlap=32, chunk_size=128, **kwargs):
+        '''
+        Encode audios into latents. Audios should already be preprocesed by preprocess_audio_for_encoder.
+        If chunked is True, split the audio into chunks of a given maximum size chunk_size, with given overlap.
+        Overlap and chunk_size params are both measured in number of latents (not audio samples) 
+        # and therefore you likely could use the same values with decode_audio. 
+        A overlap of zero will cause discontinuity artefacts. Overlap should be => receptive field size. 
+        Every autoencoder will have a different receptive field size, and thus ideal overlap.
+        You can determine it empirically by diffing unchunked vs chunked output and looking at maximum diff.
+        The final chunk may have a longer overlap in order to keep chunk_size consistent for all chunks.
+        Smaller chunk_size uses less memory, but more compute.
+        The chunk_size vs memory tradeoff isn't linear, and possibly depends on the GPU and CUDA version
+        For example, on a A6000 chunk_size 128 is overall faster than 256 and 512 even though it has more chunks
+        '''
+        audio = audio.unsqueeze(1)
+        if not chunked:
+            # default behavior. Encode the entire audio in parallel
+            return self.encode(audio)
+        else:
+            # CHUNKED ENCODING
+            # samples_per_latent is just the downsampling ratio (which is also the upsampling ratio)
+            samples_per_latent = self.ae.downsampling_ratio
+            total_size = audio.shape[2] # in samples
+            batch_size = audio.shape[0]
+            chunk_size *= samples_per_latent # converting metric in latents to samples
+            overlap *= samples_per_latent # converting metric in latents to samples
+            hop_size = chunk_size - overlap
+            chunks = []
+            for i in range(0, total_size - chunk_size + 1, hop_size):
+                chunk = audio[:,:,i:i+chunk_size]
+                chunks.append(chunk)
+            if i+chunk_size != total_size:
+                # Final chunk
+                chunk = audio[:,:,-chunk_size:]
+                chunks.append(chunk)
+            chunks = torch.stack(chunks)
+            num_chunks = chunks.shape[0]
+            # Note: y_size might be a different value from the latent length used in diffusion training
+            # because we can encode audio of varying lengths
+            # However, the audio should've been padded to a multiple of samples_per_latent by now.
+            y_size = total_size // samples_per_latent
+            # Create an empty latent, we will populate it with chunks as we encode them
+            y_final = torch.zeros((batch_size,self.ae.encoder.latent_dim,y_size)).to(audio.device)
+            for i in range(num_chunks):
+                x_chunk = chunks[i,:]
+                # encode the chunk
+                y_chunk = self.encode(x_chunk)
+                # figure out where to put the audio along the time domain
+                if i == num_chunks-1:
+                    # final chunk always goes at the end
+                    t_end = y_size
+                    t_start = t_end - y_chunk.shape[2]
+                else:
+                    t_start = i * hop_size // samples_per_latent
+                    t_end = t_start + chunk_size // samples_per_latent
+                #  remove the edges of the overlaps
+                ol = overlap//samples_per_latent//2
+                chunk_start = 0
+                chunk_end = y_chunk.shape[2]
+                if i > 0:
+                    # no overlap for the start of the first chunk
+                    t_start += ol
+                    chunk_start += ol
+                if i < num_chunks-1:
+                    # no overlap for the end of the last chunk
+                    t_end -= ol
+                    chunk_end -= ol
+                # paste the chunked audio into our y_final output audio
+                y_final[:,:,t_start:t_end] = y_chunk[:,:,chunk_start:chunk_end]
+            return y_final
     
+    def decode_audio(self, latents, chunked=False, overlap=32, chunk_size=128, **kwargs):
+        '''
+        Decode latents to audio. 
+        If chunked is True, split the latents into chunks of a given maximum size chunk_size, with given overlap, both of which are measured in number of latents. 
+        A overlap of zero will cause discontinuity artefacts. Overlap should be => receptive field size. 
+        Every autoencoder will have a different receptive field size, and thus ideal overlap.
+        You can determine it empirically by diffing unchunked vs chunked audio and looking at maximum diff.
+        The final chunk may have a longer overlap in order to keep chunk_size consistent for all chunks.
+        Smaller chunk_size uses less memory, but more compute.
+        The chunk_size vs memory tradeoff isn't linear, and possibly depends on the GPU and CUDA version
+        For example, on a A6000 chunk_size 128 is overall faster than 256 and 512 even though it has more chunks
+        '''
+        if not chunked:
+            # default behavior. Decode the entire latent in parallel
+            return self.decode(latents)
+        else:
+            # chunked decoding
+            hop_size = chunk_size - overlap
+            total_size = latents.shape[2]
+            batch_size = latents.shape[0]
+            chunks = []
+            for i in range(0, total_size - chunk_size + 1, hop_size):
+                chunk = latents[:,:,i:i+chunk_size]
+                chunks.append(chunk)
+            if i+chunk_size != total_size:
+                # Final chunk
+                chunk = latents[:,:,-chunk_size:]
+                chunks.append(chunk)
+            chunks = torch.stack(chunks)
+            num_chunks = chunks.shape[0]
+            # samples_per_latent is just the downsampling ratio
+            samples_per_latent = self.ae.downsampling_ratio
+            # Create an empty waveform, we will populate it with chunks as decode them
+            y_size = total_size * samples_per_latent
+            y_final = torch.zeros((batch_size,1,y_size)).to(latents.device)
+            for i in range(num_chunks):
+                x_chunk = chunks[i,:]
+                # decode the chunk
+                y_chunk = self.decode(x_chunk)
+                # figure out where to put the audio along the time domain
+                if i == num_chunks-1:
+                    # final chunk always goes at the end
+                    t_end = y_size
+                    t_start = t_end - y_chunk.shape[2]
+                else:
+                    t_start = i * hop_size * samples_per_latent
+                    t_end = t_start + chunk_size * samples_per_latent
+                #  remove the edges of the overlaps
+                ol = (overlap//2) * samples_per_latent
+                chunk_start = 0
+                chunk_end = y_chunk.shape[2]
+                if i > 0:
+                    # no overlap for the start of the first chunk
+                    t_start += ol
+                    chunk_start += ol
+                if i < num_chunks-1:
+                    # no overlap for the end of the last chunk
+                    t_end -= ol
+                    chunk_end -= ol
+                # paste the chunked audio into our y_final output audio
+                y_final[:,:,t_start:t_end] = y_chunk[:,:,chunk_start:chunk_end]
+            return y_final
+
+
+
     def freeze_encoder(self):
-        for layer in self.ae.encoder.parameters():
-            layer.requires_grad = False
+        self.ae.encoder.requires_grad_(False)
         
     def freeze_decoder(self):
-        for layer in self.ae.decoder.parameters():
-            layer.requires_grad = False
+        self.ae.decoder.requires_grad_(False)
         
     def unfreeze_encoder(self):
-        for layer in self.ae.encoder.parameters():
-            layer.requires_grad = True
+        self.ae.encoder.requires_grad_(True)
         
     def unfreeze_decoder(self):
-        for layer in self.ae.decoder.parameters():
-            layer.requires_grad = True
+        self.ae.decoder.requires_grad_(True)
