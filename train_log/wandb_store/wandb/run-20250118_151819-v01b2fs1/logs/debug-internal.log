@@ -1,0 +1,132 @@
+2025-01-18 15:18:19,197 INFO    StreamThr :5169 [internal.py:wandb_internal():86] W&B internal server running at pid: 5169, started at: 2025-01-18 15:18:19.197445
+2025-01-18 15:18:19,198 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status
+2025-01-18 15:18:19,262 INFO    WriterThread:5169 [datastore.py:open_for_write():85] open: ../train_log/wandb_store/wandb/run-20250118_151819-v01b2fs1/run-v01b2fs1.wandb
+2025-01-18 15:18:19,263 DEBUG   SenderThread:5169 [sender.py:send():369] send: header
+2025-01-18 15:18:19,288 DEBUG   SenderThread:5169 [sender.py:send():369] send: run
+2025-01-18 15:18:19,767 INFO    SenderThread:5169 [dir_watcher.py:__init__():211] watching files in: ../train_log/wandb_store/wandb/run-20250118_151819-v01b2fs1/files
+2025-01-18 15:18:19,767 INFO    SenderThread:5169 [sender.py:_start_run_threads():1100] run started: v01b2fs1 with start time 1737231499.198045
+2025-01-18 15:18:19,773 DEBUG   SenderThread:5169 [sender.py:send_request():396] send_request: summary_record
+2025-01-18 15:18:19,773 INFO    SenderThread:5169 [sender.py:_save_file():1354] saving file wandb-summary.json with policy end
+2025-01-18 15:18:19,784 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: check_version
+2025-01-18 15:18:19,784 DEBUG   SenderThread:5169 [sender.py:send_request():396] send_request: check_version
+2025-01-18 15:18:19,930 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: run_start
+2025-01-18 15:18:19,940 DEBUG   HandlerThread:5169 [system_info.py:__init__():31] System info init
+2025-01-18 15:18:19,940 DEBUG   HandlerThread:5169 [system_info.py:__init__():46] System info init done
+2025-01-18 15:18:19,940 INFO    HandlerThread:5169 [system_monitor.py:start():181] Starting system monitor
+2025-01-18 15:18:19,940 INFO    SystemMonitor:5169 [system_monitor.py:_start():145] Starting system asset monitoring threads
+2025-01-18 15:18:19,941 INFO    HandlerThread:5169 [system_monitor.py:probe():201] Collecting system info
+2025-01-18 15:18:19,943 INFO    SystemMonitor:5169 [interfaces.py:start():190] Started cpu monitoring
+2025-01-18 15:18:19,943 DEBUG   HandlerThread:5169 [system_info.py:probe():195] Probing system
+2025-01-18 15:18:19,943 INFO    SystemMonitor:5169 [interfaces.py:start():190] Started disk monitoring
+2025-01-18 15:18:19,944 INFO    SystemMonitor:5169 [interfaces.py:start():190] Started gpuapple monitoring
+2025-01-18 15:18:19,947 INFO    SystemMonitor:5169 [interfaces.py:start():190] Started memory monitoring
+2025-01-18 15:18:19,950 INFO    SystemMonitor:5169 [interfaces.py:start():190] Started network monitoring
+2025-01-18 15:18:19,954 DEBUG   HandlerThread:5169 [system_info.py:_probe_git():180] Probing git
+2025-01-18 15:18:19,986 DEBUG   HandlerThread:5169 [system_info.py:_probe_git():188] Probing git done
+2025-01-18 15:18:19,986 DEBUG   HandlerThread:5169 [system_info.py:probe():240] Probing system done
+2025-01-18 15:18:19,986 DEBUG   HandlerThread:5169 [system_monitor.py:probe():210] {'os': 'macOS-14.1.1-arm64-arm-64bit', 'python': '3.11.5', 'heartbeatAt': '2025-01-18T20:18:19.943603', 'startedAt': '2025-01-18T20:18:19.139756', 'docker': None, 'cuda': None, 'args': ('configs/1024_config.yml',), 'state': 'running', 'program': '/Users/ssongjinseobgmail.com/coding/Re-Beethoven/src/train_diffusion.py', 'codePath': 'src/train_diffusion.py', 'git': {'remote': 'https://github.com/axion66/Re-Beethoven.git', 'commit': '5a7eb7338838d46c4dcd54c6cbd8bcb0ade3ee47'}, 'email': 'ssongjinseob@gmail.com', 'root': '/Users/ssongjinseobgmail.com/coding/Re-Beethoven', 'host': 'songjinseob-ui-iMac.local', 'username': 'ssongjinseobgmail.com', 'executable': '/opt/homebrew/opt/python@3.11/bin/python3.11', 'cpu_count': 8, 'cpu_count_logical': 8, 'cpu_freq': {'current': 3204, 'min': 600, 'max': 3204}, 'cpu_freq_per_core': [{'current': 3204, 'min': 600, 'max': 3204}], 'disk': {'total': 460.4317207336426, 'used': 13.495010375976562}, 'gpuapple': {'type': 'arm', 'vendor': 'Apple'}, 'memory': {'total': 8.0}}
+2025-01-18 15:18:19,986 INFO    HandlerThread:5169 [system_monitor.py:probe():211] Finished collecting system info
+2025-01-18 15:18:19,986 INFO    HandlerThread:5169 [system_monitor.py:probe():214] Publishing system info
+2025-01-18 15:18:19,986 DEBUG   HandlerThread:5169 [system_info.py:_save_pip():51] Saving list of pip packages installed into the current environment
+2025-01-18 15:18:19,986 DEBUG   HandlerThread:5169 [system_info.py:_save_pip():67] Saving pip packages done
+2025-01-18 15:18:19,987 INFO    HandlerThread:5169 [system_monitor.py:probe():216] Finished publishing system info
+2025-01-18 15:18:19,998 DEBUG   SenderThread:5169 [sender.py:send():369] send: files
+2025-01-18 15:18:19,998 INFO    SenderThread:5169 [sender.py:_save_file():1354] saving file wandb-metadata.json with policy now
+2025-01-18 15:18:20,002 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: stop_status
+2025-01-18 15:18:20,002 DEBUG   SenderThread:5169 [sender.py:send_request():396] send_request: stop_status
+2025-01-18 15:18:20,178 DEBUG   SenderThread:5169 [sender.py:send():369] send: telemetry
+2025-01-18 15:18:20,573 INFO    wandb-upload_0:5169 [upload_job.py:push():133] Uploaded file /var/folders/3q/svznhqyd5q73pvhf_d5zds9w0000gn/T/tmpcjejjkpzwandb/ny99xlt7-wandb-metadata.json
+2025-01-18 15:18:20,773 INFO    Thread-12 :5169 [dir_watcher.py:_on_file_created():272] file/dir created: ../train_log/wandb_store/wandb/run-20250118_151819-v01b2fs1/files/output.log
+2025-01-18 15:18:20,774 INFO    Thread-12 :5169 [dir_watcher.py:_on_file_created():272] file/dir created: ../train_log/wandb_store/wandb/run-20250118_151819-v01b2fs1/files/wandb-metadata.json
+2025-01-18 15:18:20,774 INFO    Thread-12 :5169 [dir_watcher.py:_on_file_created():272] file/dir created: ../train_log/wandb_store/wandb/run-20250118_151819-v01b2fs1/files/wandb-summary.json
+2025-01-18 15:18:20,774 INFO    Thread-12 :5169 [dir_watcher.py:_on_file_created():272] file/dir created: ../train_log/wandb_store/wandb/run-20250118_151819-v01b2fs1/files/requirements.txt
+2025-01-18 15:18:22,779 INFO    Thread-12 :5169 [dir_watcher.py:_on_file_modified():289] file/dir modified: ../train_log/wandb_store/wandb/run-20250118_151819-v01b2fs1/files/output.log
+2025-01-18 15:18:25,198 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:18:30,372 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:18:35,186 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: stop_status
+2025-01-18 15:18:35,207 DEBUG   SenderThread:5169 [sender.py:send_request():396] send_request: stop_status
+2025-01-18 15:18:35,382 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:18:40,501 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:18:45,574 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:18:50,140 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: stop_status
+2025-01-18 15:18:50,176 DEBUG   SenderThread:5169 [sender.py:send_request():396] send_request: stop_status
+2025-01-18 15:18:51,665 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:18:52,469 INFO    Thread-12 :5169 [dir_watcher.py:_on_file_modified():289] file/dir modified: ../train_log/wandb_store/wandb/run-20250118_151819-v01b2fs1/files/config.yaml
+2025-01-18 15:18:57,087 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:19:02,185 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:19:05,559 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: stop_status
+2025-01-18 15:19:05,636 DEBUG   SenderThread:5169 [sender.py:send_request():396] send_request: stop_status
+2025-01-18 15:19:07,733 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:19:12,887 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:19:17,957 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:19:20,002 DEBUG   SystemMonitor:5169 [system_monitor.py:_start():159] Starting system metrics aggregation loop
+2025-01-18 15:19:20,228 DEBUG   SenderThread:5169 [sender.py:send():369] send: telemetry
+2025-01-18 15:19:20,296 DEBUG   SenderThread:5169 [sender.py:send():369] send: stats
+2025-01-18 15:19:20,418 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: stop_status
+2025-01-18 15:19:20,465 DEBUG   SenderThread:5169 [sender.py:send_request():396] send_request: stop_status
+2025-01-18 15:19:23,363 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:19:24,483 INFO    Thread-12 :5169 [dir_watcher.py:_on_file_modified():289] file/dir modified: ../train_log/wandb_store/wandb/run-20250118_151819-v01b2fs1/files/config.yaml
+2025-01-18 15:19:29,327 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:19:34,420 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:19:35,381 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: stop_status
+2025-01-18 15:19:35,457 DEBUG   SenderThread:5169 [sender.py:send_request():396] send_request: stop_status
+2025-01-18 15:19:40,376 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:19:45,452 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:19:50,557 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:19:50,669 DEBUG   SenderThread:5169 [sender.py:send():369] send: stats
+2025-01-18 15:19:50,868 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: stop_status
+2025-01-18 15:19:50,988 DEBUG   SenderThread:5169 [sender.py:send_request():396] send_request: stop_status
+2025-01-18 15:19:56,400 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:20:01,812 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:20:05,510 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: stop_status
+2025-01-18 15:20:05,546 DEBUG   SenderThread:5169 [sender.py:send_request():396] send_request: stop_status
+2025-01-18 15:20:07,522 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:20:12,619 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:20:17,714 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:20:20,917 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: stop_status
+2025-01-18 15:20:21,369 DEBUG   SenderThread:5169 [sender.py:send_request():396] send_request: stop_status
+2025-01-18 15:20:22,142 DEBUG   SenderThread:5169 [sender.py:send():369] send: stats
+2025-01-18 15:20:23,223 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:20:28,361 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:20:33,572 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:20:35,706 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: stop_status
+2025-01-18 15:20:35,833 DEBUG   SenderThread:5169 [sender.py:send_request():396] send_request: stop_status
+2025-01-18 15:20:39,107 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:20:44,169 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:20:49,279 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:20:50,783 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: stop_status
+2025-01-18 15:20:50,851 DEBUG   SenderThread:5169 [sender.py:send_request():396] send_request: stop_status
+2025-01-18 15:20:52,239 DEBUG   SenderThread:5169 [sender.py:send():369] send: stats
+2025-01-18 15:20:54,422 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:20:59,462 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:21:04,502 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:21:05,627 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: stop_status
+2025-01-18 15:21:05,673 DEBUG   SenderThread:5169 [sender.py:send_request():396] send_request: stop_status
+2025-01-18 15:21:09,841 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:21:14,960 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:21:20,078 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:21:20,649 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: stop_status
+2025-01-18 15:21:20,701 DEBUG   SenderThread:5169 [sender.py:send_request():396] send_request: stop_status
+2025-01-18 15:21:22,008 DEBUG   SenderThread:5169 [sender.py:send():369] send: stats
+2025-01-18 15:21:25,961 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:21:30,912 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:21:36,652 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:21:37,064 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: stop_status
+2025-01-18 15:21:37,277 DEBUG   SenderThread:5169 [sender.py:send_request():396] send_request: stop_status
+2025-01-18 15:21:42,628 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:21:47,686 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:21:50,814 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: stop_status
+2025-01-18 15:21:50,848 DEBUG   SenderThread:5169 [sender.py:send_request():396] send_request: stop_status
+2025-01-18 15:21:52,174 DEBUG   SenderThread:5169 [sender.py:send():369] send: stats
+2025-01-18 15:21:53,251 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:21:58,309 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:22:03,368 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:22:06,087 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: stop_status
+2025-01-18 15:22:06,137 DEBUG   SenderThread:5169 [sender.py:send_request():396] send_request: stop_status
+2025-01-18 15:22:09,406 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:22:14,478 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:22:19,747 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report
+2025-01-18 15:22:20,943 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: stop_status
+2025-01-18 15:22:21,035 DEBUG   SenderThread:5169 [sender.py:send_request():396] send_request: stop_status
+2025-01-18 15:22:22,987 DEBUG   SenderThread:5169 [sender.py:send():369] send: stats
+2025-01-18 15:22:25,141 DEBUG   HandlerThread:5169 [handler.py:handle_request():144] handle_request: status_report

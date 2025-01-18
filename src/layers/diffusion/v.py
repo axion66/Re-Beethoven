@@ -8,6 +8,7 @@ import math
 from tqdm import trange
 import random
 from layers.tools.losses import *
+import os
 class Denoiser(nn.Module):
     # mostly from https://github.com/crowsonkb/k-diffusion/blob/master/k_diffusion/layers.py
     # also from https://github.com/Stability-AI/stable-audio-tools/blob/main/stable_audio_tools/inference/sampling.py#L179
@@ -23,7 +24,8 @@ class Denoiser(nn.Module):
         s_tmin: float = 0.05, 
         s_tmax: float = 1e+8, 
         s_noise: float = 1.001, 
-        device: torch.device = torch.device("cuda:0")
+        device: torch.device = torch.device("cuda:0"),
+        preencoded_dir = None
     ):
         super().__init__()
         self.config = config
@@ -39,7 +41,8 @@ class Denoiser(nn.Module):
         self.s_noise = s_noise
 
         self.rng = torch.quasirandom.SobolEngine(1, scramble=True) 
-    
+        self.use_preencoded_audio = True if os.path.exists(preencoded_dir) else False
+        self.configure_loss()
     def configure_loss(self):
         self.mse = nn.MSELoss()
         '''
@@ -51,12 +54,15 @@ class Denoiser(nn.Module):
         '''
         self.loss = LossModule(name="DiT")
         self.loss.append("mrstft", weight_loss=0.25, module=MultiResolutionSTFTLoss(
-            sample_rate=self.FFT_CFG['sr']).to(self.MODEL_CFG['device']))
-
+            sample_rate=16000, fft_sizes=[16, 32], hop_sizes=[16, 32], win_lengths=[16, 32]).to(self.device))
     def forward(self, x: Tensor) -> Tensor:
-        with torch.no_grad():
-            x = self.model.autoencoder.encode_audio(x)
-            x /= 3.75
+
+        if not self.use_preencoded_audio:
+            with torch.no_grad():
+                x = self.model.autoencoder.encode_audio(x)
+            
+        
+        x /= 3.75
         t = self.rng.draw(x.shape[0])[:, 0].to(self.device)
         alphas, sigmas = self.get_alphas_sigmas(t)
         alphas = alphas[:, None, None]
@@ -68,35 +74,19 @@ class Denoiser(nn.Module):
         
         return self.model.autoencoder.decode_audio(pred * 3.75), t      
 
-    @torch.no_grad()
-    def pyramid_noise_like(self, x):
-          '''
-            Noise that contains low-frequency components as well as high-frequency ones.
-          '''
-          discount = 0.6
-          b, c, l = x.shape 
-          u = nn.Upsample(size=(l), mode='linear')
-          noise = torch.randn_like(x) * x.std()
-          for i in range(10):
-            r = random.random()*2+2 
-            l = max(1, int(l/(r**i)))
-            noise += u(torch.randn(b, c, l).to(x)) * discount ** i
-            if l==1: break 
-          return (noise / noise.std()).to("cuda" if torch.cuda.is_available() else "cpu")  # make std of 1.
-
-
-
 
     def get_alphas_sigmas(self, t):
         
         return torch.cos(t * math.pi / 2), torch.sin(t * math.pi / 2)
     
     def loss_fn(self, x:Tensor):
-        with torch.no_grad():
-            x = self.model.autoencoder.encode_audio(x)
-            latent_std = x.std()
-            latent_mean = x.mean()
-            x /= 3.75
+        if not self.use_preencoded_audio:
+            with torch.no_grad():
+                x = self.model.autoencoder.encode_audio(x)
+
+        latent_std = x.std()
+        latent_mean = x.mean()
+        x /= 3.75
         t = self.rng.draw(x.shape[0])[:, 0].to(self.device) 
         alphas, sigmas = self.get_alphas_sigmas(t)
         alphas = alphas[:, None, None]

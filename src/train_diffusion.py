@@ -17,7 +17,7 @@ from layers.tools.losses import *
 from aeiou.viz import audio_spectrogram_image
 import torchaudio
 import soundfile as sf
-
+import time
 def print_model_size(name, model):
     for name, param in model.named_parameters():
         print(f"Layer: {name} | Size: {param.size()}") 
@@ -34,8 +34,9 @@ class Trainer:
         self.configure_loader()
         self.configure_optimizer()
         self.configure_wandb()
-        
-        
+        self.preencode_audio()
+
+
     def configure_config(self, cfg_path):
         with open(cfg_path) as stream:
             self.cfg = yaml.safe_load(stream)
@@ -43,9 +44,59 @@ class Trainer:
             self.MODEL_CFG = self.cfg['model']
             self.FILE_CFG = self.cfg['file']
 
-   
+    def preencode_audio(self):
+        self.train_preencode = self.MODEL_CFG['train_precompute']
+        self.dir_preencode = self.MODEL_CFG['use_precompute']
+        if self.train_preencode:
+            os.makedirs(self.dir_preencode, exist_ok=True)
+            train_path, test_path = map(lambda x: os.path.join(self.dir_preencode, x), ('train.pt', 'test.pt'))
+            files = []
+            print("Start storing preencoding...")
+            for i, x in enumerate(tqdm(self.train_loader, desc=f"PreCompute-train")):
+
+                x = x[0].to(self.device)
+                with torch.autocast(device_type = "cuda" if torch.cuda.is_available() else "cpu", dtype = torch.float16):
+                    precomputed_audio = self.denoiser.model.autoencoder.encode_audio(x)
+                files.append(precomputed_audio.cpu())
+                del precomputed_audio
+            
+            torch.save(torch.cat(files, dim=0), train_path)
+            
+            files = []
+            for i, x in enumerate(tqdm(self.test_loader, desc=f"PreCompute-test")):
+                x = x[0].to(self.device)
+                with torch.autocast(device_type = "cuda" if torch.cuda.is_available() else "cpu", dtype = torch.float16):
+                    precomputed_audio = self.denoiser.model.autoencoder.encode_audio(x)
+                files.append(precomputed_audio.cpu())
+                del precomputed_audio
+            
+            files = torch.cat(files, dim=0)
+            torch.save(files, test_path)
+            print(f'train and test dataset store at {train_path} and {test_path}.')
+            s = time.time()
+            train = torch.load(train_path)
+            test = torch.load(test_path)
+            print(f'took {time.time() - s} time to load dataset.')
+
+            self.train_loader = DataLoader(
+                dataset = train, 
+                batch_size = self.MODEL_CFG['batch_size'], 
+                num_workers = self.MODEL_CFG['num_workers'], 
+                shuffle = True, 
+                drop_last = True,
+            )
+            
+            self.test_loader = DataLoader(
+                dataset = test, 
+                batch_size = self.MODEL_CFG['batch_size'], 
+                num_workers = self.MODEL_CFG['num_workers'], 
+                shuffle = False,
+                drop_last = False
+            )
+
 
     def configure_model(self):
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.autoencoder = AutoEncoderWrapper(
             autoencoder = AudioAutoencoder(),
             autoencoder_state_path = self.MODEL_CFG['pretrained_autoencoder']
@@ -58,8 +109,9 @@ class Trainer:
             config = self.FFT_CFG,
             model = self.dit, 
             sigma_data = 0.5,
-            device = torch.device(self.MODEL_CFG['device'])
-        ).to(self.MODEL_CFG['device'])
+            device = self.device,
+            preencoded_dir = self.MODEL_CFG['use_precompute']
+        ).to(self.device)
 
         if (self.MODEL_CFG['resume_diffusion']):
             state = torch.load(self.MODEL_CFG['resume_diffusion_path'])
@@ -131,7 +183,7 @@ class Trainer:
             for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{self.MODEL_CFG['epoch']}")):
                 self.optim.zero_grad()
 
-                x = x[0].to(self.MODEL_CFG['device'])
+                x = x[0].to(self.device)
                 with torch.autocast(device_type = "cuda" if torch.cuda.is_available() else "cpu", dtype = torch.float16):
                     loss, latent_std, latent_mean, scaled_latent_std = self.denoiser.loss_fn(x)
                 
@@ -163,7 +215,7 @@ class Trainer:
                         sum_loss = 0.0
                     
                         for x in self.test_loader:
-                            x = x[0].to(self.MODEL_CFG['device']) 
+                            x = x[0].to(self.device) 
                             with torch.autocast(device_type = "cuda" if torch.cuda.is_available() else "cpu", dtype = torch.float16):
                                 loss, latent_std, latent_mean, scaled_latent_mean = self.denoiser.loss_fn(x)
                             sum_loss += loss

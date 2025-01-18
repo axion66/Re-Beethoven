@@ -1,0 +1,27 @@
+2025-01-18 11:53:33,115 INFO    MainThread:6772 [wandb_setup.py:_flush():76] Current SDK version is 0.15.4
+2025-01-18 11:53:33,116 INFO    MainThread:6772 [wandb_setup.py:_flush():76] Configure stats pid to 6772
+2025-01-18 11:53:33,116 INFO    MainThread:6772 [wandb_setup.py:_flush():76] Loading settings from /Users/ssongjinseobgmail.com/.config/wandb/settings
+2025-01-18 11:53:33,116 INFO    MainThread:6772 [wandb_setup.py:_flush():76] Loading settings from /Users/ssongjinseobgmail.com/coding/Re-Beethoven/src/wandb/settings
+2025-01-18 11:53:33,116 INFO    MainThread:6772 [wandb_setup.py:_flush():76] Loading settings from environment variables: {}
+2025-01-18 11:53:33,116 INFO    MainThread:6772 [wandb_setup.py:_flush():76] Applying setup settings: {'_disable_service': False}
+2025-01-18 11:53:33,116 INFO    MainThread:6772 [wandb_setup.py:_flush():76] Inferring run settings from compute environment: {'program_relpath': 'src/train_diffusion.py', 'program': '/Users/ssongjinseobgmail.com/coding/Re-Beethoven/src/train_diffusion.py'}
+2025-01-18 11:53:33,116 INFO    MainThread:6772 [wandb_init.py:_log_setup():507] Logging user logs to ../train_log/wandb_store/wandb/run-20250118_115333-i486ejj1/logs/debug.log
+2025-01-18 11:53:33,116 INFO    MainThread:6772 [wandb_init.py:_log_setup():508] Logging internal logs to ../train_log/wandb_store/wandb/run-20250118_115333-i486ejj1/logs/debug-internal.log
+2025-01-18 11:53:33,117 INFO    MainThread:6772 [wandb_init.py:init():547] calling init triggers
+2025-01-18 11:53:33,117 INFO    MainThread:6772 [wandb_init.py:init():554] wandb.init called with sweep_config: {}
+config: {'Device': 'No GPU Detected.', 'fft': {'n_fft': 512, 'win_len': 512, 'hop_length': 256, 'seq_len': 262144, 'overlap_ratio': 1, 'cut_first': 4000, 'sr': 16000, 'num_blocks': 2, 'activation_fn': 'snake', 'norm_fn': 'LayerNorm', 'dropout': 0.1, 'num_evaluation': 8, 'downsampling_ratio': 2048, 'num_heads': 8, 'embed_dim': 1024}, 'model': {'epoch': 1000, 'batch_size': 24, 'lr': 8e-05, 'warmup_period': 4000, 'num_workers': 56, 'evaluation_cycle': 250, 'num_samples': 8, 'pretrained_autoencoder': '../models/pretrained_autoencoder/last.pth', 'freeze_encoder': True, 'freeze_decoder': True, 'resume_diffusion': False, 'resume_diffusion_path': '', 'train_precompute': True, 'use_precompute': '../preencoded_dataset/'}, 'file': {'audio_folder': '../dataset', 'log_dir': '../train_log/', 'project_name': 'DiT', 'run_name': '0117-DiT'}}
+2025-01-18 11:53:33,117 INFO    MainThread:6772 [wandb_init.py:init():596] starting backend
+2025-01-18 11:53:33,117 INFO    MainThread:6772 [wandb_init.py:init():600] setting up manager
+2025-01-18 11:53:33,153 INFO    MainThread:6772 [backend.py:_multiprocessing_setup():106] multiprocessing start_methods=spawn,fork,forkserver, using: spawn
+2025-01-18 11:53:33,156 INFO    MainThread:6772 [wandb_init.py:init():606] backend started and connected
+2025-01-18 11:53:33,261 INFO    MainThread:6772 [wandb_init.py:init():703] updated telemetry
+2025-01-18 11:53:33,286 INFO    MainThread:6772 [wandb_init.py:init():736] communicating run to backend with 60.0 second timeout
+2025-01-18 11:53:33,568 INFO    MainThread:6772 [wandb_run.py:_on_init():2176] communicating current version
+2025-01-18 11:53:33,691 INFO    MainThread:6772 [wandb_run.py:_on_init():2185] got version response upgrade_message: "wandb version 0.19.4 is available!  To upgrade, please run:\n $ pip install wandb --upgrade"
+
+2025-01-18 11:53:33,696 INFO    MainThread:6772 [wandb_init.py:init():787] starting run threads in backend
+2025-01-18 11:53:33,771 INFO    MainThread:6772 [wandb_run.py:_console_start():2155] atexit reg
+2025-01-18 11:53:33,771 INFO    MainThread:6772 [wandb_run.py:_redirect():2010] redirect: 3
+2025-01-18 11:53:33,771 INFO    MainThread:6772 [wandb_run.py:_redirect():2075] Wrapping output streams.
+2025-01-18 11:53:33,772 INFO    MainThread:6772 [wandb_run.py:_redirect():2100] Redirects installed.
+2025-01-18 11:53:33,773 INFO    MainThread:6772 [wandb_init.py:init():828] run started, returning control to user process

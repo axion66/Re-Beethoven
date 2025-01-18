@@ -16,7 +16,6 @@ fft:
   embed_dim: 512
 model:
   epoch: 1000
-  device: "cuda:0"
   batch_size: 24
   lr: 0.00008
   warmup_period: 4000
@@ -28,6 +27,8 @@ model:
   freeze_decoder: True
   resume_diffusion: False
   resume_diffusion_path: "../models/pretrained_diffusion/best6.pth"
+  train_precompute: True
+  use_precomputed: "../preencoded_dataset/"
 file:
   audio_folder: "../dataset"
   log_dir: "../train_log/"

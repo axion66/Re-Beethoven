@@ -1,0 +1,1 @@
+to optimize the cost of DiT, In this Dir we will pre-compute all the audios into latents and store

@@ -3,10 +3,10 @@ fft:
   win_len: 512
   hop_length: 256
   seq_len: 262144
-  overlap_ratio: 2
+  overlap_ratio: 1
   cut_first: 4000
   sr: 16000
-  num_blocks: 18
+  num_blocks: 2
   activation_fn: "snake"
   norm_fn: "LayerNorm"
   dropout: 0.1
@@ -16,7 +16,6 @@ fft:
   embed_dim: 1024
 model:
   epoch: 1000
-  device: "cuda:0"
   batch_size: 24
   lr: 0.00008
   warmup_period: 4000
@@ -28,8 +27,10 @@ model:
   freeze_decoder: True
   resume_diffusion: False
   resume_diffusion_path: ""
+  train_precompute: True
+  use_precompute: "../preencoded_dataset/"
 file:
-  audio_folder: "../dataset"
+  audio_folder: "../demo_dataset"
   log_dir: "../train_log/"
   project_name: "DiT"
   run_name: "0117-DiT"

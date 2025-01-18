@@ -10,6 +10,8 @@ models/
 dataset/train_data
 dataset/train_labels
 dataset_test/
+demo_dataset/* 
+dataset/*
 src/wandb/
 src/train_log/
 

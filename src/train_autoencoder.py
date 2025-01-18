@@ -43,11 +43,12 @@ class Trainer:
             self.FILE_CFG = self.cfg['file']
             
     def configure_model(self):
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.net = AudioAutoencoder(
             sample_rate = self.FFT_CFG['sr'],
             downsampling_ratio = self.FFT_CFG['downsampling_ratio'],
             bottleneck = AEBottleneck()
-        ).to(self.MODEL_CFG['device'])
+        ).to(self.device)
         
         if (self.MODEL_CFG['pretrained_autoencoder'] != False):
             print(f"Loaded pretrained model at {self.MODEL_CFG['pretrained_autoencoder']} | File exists: {os.path.exists(self.MODEL_CFG['pretrained_autoencoder'])}")
@@ -70,7 +71,7 @@ class Trainer:
         '''
         self.loss = LossModule(name="AutoEncoder")
         self.loss.append("mrstft", weight_loss=0.25, module=MultiResolutionSTFTLoss(
-            sample_rate=self.FFT_CFG['sr']).to(self.MODEL_CFG['device']))
+            sample_rate=self.FFT_CFG['sr']).to(self.device))
         #self.loss.append("L1", weight_loss=0.1,module=L1Loss().to(self.MODEL_CFG['device']))        
 
     
@@ -113,7 +114,8 @@ class Trainer:
             },
             
         )
-        
+    
+    
     def train(self):
         
         
@@ -128,7 +130,7 @@ class Trainer:
 
             for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{EPOCH}")):
                 info = {}
-                x = x[0].to(self.MODEL_CFG['device']).unsqueeze(1)  # batch, 1, seq
+                x = x[0].to(self.device).unsqueeze(1)  # batch, 1, seq
                 latents = self.net.encode(x)
                 decoded = self.net.decode(latents).unsqueeze(1) # batch, 1, seq
 
@@ -178,7 +180,7 @@ class Trainer:
                         os.makedirs(FAKE_DIR, exist_ok=True)
                         os.makedirs(ORIG_DIR, exist_ok=True)
                         for idx, x in enumerate(self.test_loader):
-                            x = x[0].to(self.MODEL_CFG['device'])
+                            x = x[0].to(self.device)
                             latents = self.net.encode(x)
                             decoded = self.net.decode(latents)
                             loss,_ = self.loss.loss_fn(x.unsqueeze(1), decoded.unsqueeze(1))
