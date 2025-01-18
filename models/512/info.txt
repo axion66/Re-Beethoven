@@ -1,0 +1,35 @@
+fft:
+  n_fft: 512
+  win_len: 512
+  hop_length: 256
+  seq_len: 262144
+  overlap_ratio: 2
+  cut_first: 4000
+  sr: 16000
+  num_blocks: 18
+  activation_fn: "snake"
+  norm_fn: "LayerNorm"
+  dropout: 0.1
+  num_evaluation: 8
+  downsampling_ratio: 2048
+  num_heads: 8
+  embed_dim: 512
+model:
+  epoch: 1000
+  device: "cuda:0"
+  batch_size: 24
+  lr: 0.00008
+  warmup_period: 4000
+  num_workers: 56
+  evaluation_cycle: 250
+  num_samples: 8
+  pretrained_autoencoder: "../models/pretrained_autoencoder/last.pth"
+  freeze_encoder: True
+  freeze_decoder: True
+  resume_diffusion: False
+  resume_diffusion_path: "../models/pretrained_diffusion/best6.pth"
+file:
+  audio_folder: "../dataset"
+  log_dir: "../train_log/"
+  project_name: "DiT"
+  run_name: "1209-DiT"
