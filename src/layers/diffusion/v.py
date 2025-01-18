@@ -7,7 +7,7 @@ import math
 # Karras et al. https://arxiv.org/pdf/2206.00364 implementation
 from tqdm import trange
 import random
-
+from layers.tools.losses import *
 class Denoiser(nn.Module):
     # mostly from https://github.com/crowsonkb/k-diffusion/blob/master/k_diffusion/layers.py
     # also from https://github.com/Stability-AI/stable-audio-tools/blob/main/stable_audio_tools/inference/sampling.py#L179
@@ -38,9 +38,21 @@ class Denoiser(nn.Module):
         self.s_tmax = s_tmax
         self.s_noise = s_noise
 
-        self.mse = nn.MSELoss()
         self.rng = torch.quasirandom.SobolEngine(1, scramble=True) 
     
+    def configure_loss(self):
+        self.mse = nn.MSELoss()
+        '''
+            Use STFT loss for diffusion.
+            By theorem, I have to follow the ELBO, but if MSE is working (it's not 100% ELBO.), it should work too.
+
+            Since we have encoder -> latent -> decoder 
+                where decoder was trained to reconstruct from encoder's input, it should be easy for us to make it predicut the frequencies, not noise.
+        '''
+        self.loss = LossModule(name="DiT")
+        self.loss.append("mrstft", weight_loss=0.25, module=MultiResolutionSTFTLoss(
+            sample_rate=self.FFT_CFG['sr']).to(self.MODEL_CFG['device']))
+
     def forward(self, x: Tensor) -> Tensor:
         with torch.no_grad():
             x = self.model.autoencoder.encode_audio(x)
@@ -93,7 +105,7 @@ class Denoiser(nn.Module):
         noised_inputs = x * alphas + noise * sigmas
         targets = noise * alphas - x * sigmas
         out = self.model.forward_latent(noised_inputs, t)
-        return self.mse(out, targets), latent_std, latent_mean, latent_std / 3.75
+        return self.loss.loss_fn(out, targets)[0], latent_std, latent_mean, latent_std / 3.75
      
 
     @torch.no_grad()

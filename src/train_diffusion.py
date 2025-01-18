@@ -17,6 +17,7 @@ from layers.tools.losses import *
 from aeiou.viz import audio_spectrogram_image
 import torchaudio
 import soundfile as sf
+
 def print_model_size(name, model):
     for name, param in model.named_parameters():
         print(f"Layer: {name} | Size: {param.size()}") 
@@ -41,7 +42,9 @@ class Trainer:
             self.FFT_CFG = self.cfg['fft']
             self.MODEL_CFG = self.cfg['model']
             self.FILE_CFG = self.cfg['file']
-    
+
+   
+
     def configure_model(self):
         self.autoencoder = AutoEncoderWrapper(
             autoencoder = AudioAutoencoder(),
@@ -143,7 +146,7 @@ class Trainer:
                         self.lr_schedule.step()
 
                 wandb.log({
-                    "train/loss": loss.item(), 
+                    "train/loss": loss, 
                     "train/lr": self.optim.param_groups[0]['lr'], 
                     "train/std": x.std(),
                     "train/mean": x.mean(),
