@@ -1,0 +1,32 @@
+fft:
+  n_fft: 512
+  win_len: 512
+  hop_length: 256
+  seq_len: 32768
+  overlap_ratio: 8
+  cut_first: 4000
+  sr: 16000
+  num_blocks: 16
+  activation_fn: "snake"
+  norm_fn: "LayerNorm"
+  dropout: 0.2
+  num_evaluation: 8
+  downsampling_ratio: 2048
+  num_heads: 8
+  embed_dim: 512
+model:
+  epoch: 1000
+  batch_size: 2
+  lr: 0.00025
+  warmup_period: 4000
+  num_workers: 60
+  evaluation_cycle: 1024
+  num_samples: 8
+  pretrained_autoencoder: "models/autoencoder/last.pth"
+  freeze_encoder: False
+  freeze_decoder: False
+file:
+  audio_folder: "dataset/"
+  log_dir: "stores/"
+  project_name: "Autoencoder"
+  run_name: "Beta-Autoencoder"

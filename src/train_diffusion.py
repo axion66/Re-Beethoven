@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from layers.diffusion.v import Denoiser
 from torch.optim import AdamW
-from layers.preprocess import load_files, create_overlapping_chunks_tensor
+from layers.tools.preprocess import load_files, create_overlapping_chunks_tensor
 from torch.utils.data import TensorDataset, DataLoader
 from datetime import datetime
 from tqdm import tqdm
@@ -32,9 +32,10 @@ class Trainer:
         self.configure_config(cfg_path = cfg_path)
         self.configure_model()
         self.configure_loader()
+        self.preencode_audio()
         self.configure_optimizer()
         self.configure_wandb()
-        self.preencode_audio()
+        
 
 
     def configure_config(self, cfg_path):
@@ -47,19 +48,20 @@ class Trainer:
     def preencode_audio(self):
         self.train_preencode = self.MODEL_CFG['train_precompute']
         self.dir_preencode = self.MODEL_CFG['use_precompute']
+        
+        train_path, test_path = map(lambda x: os.path.join(self.dir_preencode, x), ('train.pt', 'test.pt'))
         if self.train_preencode:
             os.makedirs(self.dir_preencode, exist_ok=True)
-            train_path, test_path = map(lambda x: os.path.join(self.dir_preencode, x), ('train.pt', 'test.pt'))
             files = []
             print("Start storing preencoding...")
             for i, x in enumerate(tqdm(self.train_loader, desc=f"PreCompute-train")):
-
+                
                 x = x[0].to(self.device)
                 with torch.autocast(device_type = "cuda" if torch.cuda.is_available() else "cpu", dtype = torch.float16):
                     precomputed_audio = self.denoiser.model.autoencoder.encode_audio(x)
                 files.append(precomputed_audio.cpu())
                 del precomputed_audio
-            
+            print(torch.cat(files, dim=0).shape)
             torch.save(torch.cat(files, dim=0), train_path)
             
             files = []
@@ -73,11 +75,14 @@ class Trainer:
             files = torch.cat(files, dim=0)
             torch.save(files, test_path)
             print(f'train and test dataset store at {train_path} and {test_path}.')
-            s = time.time()
-            train = torch.load(train_path)
-            test = torch.load(test_path)
-            print(f'took {time.time() - s} time to load dataset.')
 
+
+        if (os.path.exists(train_path)):
+            s = time.time()
+            train = TensorDataset(torch.load(train_path))
+            test = TensorDataset(torch.load(test_path))
+            print(f'took {time.time() - s} time to load dataset.')
+            
             self.train_loader = DataLoader(
                 dataset = train, 
                 batch_size = self.MODEL_CFG['batch_size'], 
@@ -93,6 +98,7 @@ class Trainer:
                 shuffle = False,
                 drop_last = False
             )
+            print("Loaded pre-encoded ones")
 
 
     def configure_model(self):
@@ -122,30 +128,31 @@ class Trainer:
         print_model_size("Denoiser", self.denoiser)
     
     def configure_loader(self):
-        batches = load_files(base_folder=self.FILE_CFG['audio_folder'], config=self.FFT_CFG)
-        tensors = torch.cat(batches, dim=-1)
-
-        x = create_overlapping_chunks_tensor(sequence = tensors, config = self.FFT_CFG)
-        x = x[torch.randperm(x.size(0))]
-
-        train = TensorDataset(x[:-self.FFT_CFG['num_evaluation'], :])
-        test = TensorDataset(x[-self.FFT_CFG['num_evaluation']:, :])
-        
-        self.train_loader = DataLoader(
-            dataset = train, 
-            batch_size = self.MODEL_CFG['batch_size'], 
-            num_workers = self.MODEL_CFG['num_workers'], 
-            shuffle = True, 
-            drop_last = True,
-        )
-        
-        self.test_loader = DataLoader(
-            dataset = test, 
-            batch_size = self.MODEL_CFG['batch_size'], 
-            num_workers = self.MODEL_CFG['num_workers'], 
-            shuffle = False,
-            drop_last = False
-        )
+        if not os.path.exists(os.path.join(self.MODEL_CFG['use_precompute'], 'train.pt')):
+            batches = load_files(base_folder=self.FILE_CFG['audio_folder'], config=self.FFT_CFG)
+            tensors = torch.cat(batches, dim=-1)
+    
+            x = create_overlapping_chunks_tensor(sequence = tensors, config = self.FFT_CFG)
+            x = x[torch.randperm(x.size(0))]
+    
+            train = TensorDataset(x[:-self.FFT_CFG['num_evaluation'], :])
+            test = TensorDataset(x[-self.FFT_CFG['num_evaluation']:, :])
+            
+            self.train_loader = DataLoader(
+                dataset = train, 
+                batch_size = self.MODEL_CFG['batch_size'], 
+                num_workers = self.MODEL_CFG['num_workers'], 
+                shuffle = True, 
+                drop_last = True,
+            )
+            
+            self.test_loader = DataLoader(
+                dataset = test, 
+                batch_size = self.MODEL_CFG['batch_size'], 
+                num_workers = self.MODEL_CFG['num_workers'], 
+                shuffle = False,
+                drop_last = False
+            )
 
     def configure_optimizer(self):
         warmup_period = self.MODEL_CFG['warmup_period']
@@ -182,7 +189,6 @@ class Trainer:
         for epoch in range(self.MODEL_CFG['epoch']):
             for i, x in enumerate(tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{self.MODEL_CFG['epoch']}")):
                 self.optim.zero_grad()
-
                 x = x[0].to(self.device)
                 with torch.autocast(device_type = "cuda" if torch.cuda.is_available() else "cpu", dtype = torch.float16):
                     loss, latent_std, latent_mean, scaled_latent_std = self.denoiser.loss_fn(x)

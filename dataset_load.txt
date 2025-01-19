@@ -1,7 +1,0 @@
-kaggle musicnet:
-
-#!/bin/bash
-kaggle datasets download imsparsh/musicnet-dataset
-
-
-

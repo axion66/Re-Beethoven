@@ -3,7 +3,7 @@ import yaml
 import torch
 import torch.nn as nn
 from torch.optim import AdamW,Adam
-from layers.preprocess import load_files, create_overlapping_chunks_tensor
+from layers.tools.preprocess import load_files, create_overlapping_chunks_tensor
 from torch.utils.data import TensorDataset, DataLoader
 from datetime import datetime
 import soundfile as sf  
@@ -89,8 +89,8 @@ class Trainer:
 
 
     def configure_optimizer(self):
-        #warmup_period = self.MODEL_CFG['warmup_period']
-        #self.discriminator = EncodecDiscriminator().to(self.MODEL_CFG['device'])
+        warmup_period = self.MODEL_CFG['warmup_period']
+        #self.discriminator = EncodecDiscriminator().to(self.device)
         #self.optim_dis = AdamW(self.discriminator.parameters(), lr=self.MODEL_CFG['lr'] * 2, betas=(0.8,0.99))
         #self.lr_schedule_dis = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim_dis, T_max=num_steps)
         #self.warmup_schedule_dis = warmup.ExponentialWarmup(self.optim_dis, warmup_period)
@@ -117,7 +117,7 @@ class Trainer:
     
     
     def train(self):
-        
+        # No Discriminator using-mode.
         
         EPOCH = self.MODEL_CFG['epoch']
         LOG_DIR = self.FILE_CFG['log_dir']
@@ -134,11 +134,11 @@ class Trainer:
                 latents = self.net.encode(x)
                 decoded = self.net.decode(latents).unsqueeze(1) # batch, 1, seq
 
-                '''
-                dis_loss, adv_loss, feature_matching_loss = self.discriminator.loss(x, decoded)
                 
+                #dis_loss, adv_loss, feature_matching_loss = self.discriminator.loss(x, decoded)
+                '''
                 if (self.loss.discriminator_step % 2 == 0):
-                    if (dis_loss < 1e+8):
+                    if (dis_loss < 1e+5):
                         self.optim_dis.zero_grad()
                         dis_loss.backward()
                         self.optim_dis.step()
@@ -147,9 +147,9 @@ class Trainer:
                 else:'''
                 
                 loss, info_loss_fn = self.loss.loss_fn(x, decoded)
-                gen_loss = loss
+                gen_loss = loss# + adv_loss + feature_matching_loss
 
-                if gen_loss < 1e+8:
+                if gen_loss < 1e+5:
                     self.optim_gen.zero_grad()
                     gen_loss.backward()
                     self.optim_gen.step()
@@ -157,7 +157,9 @@ class Trainer:
                     info.update(
                         {
                             **info_loss_fn,
-                            "generator_loss": gen_loss
+                            "generator_loss": gen_loss,
+                            #"adv_loss":adv_loss,
+                            #"feature_matching_loss": feature_matching_loss
                         }
                     )
                     epochloss.append(gen_loss.item()) 
@@ -170,6 +172,7 @@ class Trainer:
                 ) 
                
                 wandb.log(info)
+                
                 step += 1
                 if step % self.MODEL_CFG['evaluation_cycle'] == 0:
                     self.net.eval()
@@ -199,7 +202,7 @@ class Trainer:
                         torch.save(self.net.state_dict(), os.path.join(LOG_DIR, 'best_model.pth'))
                         print(f"Best model saved at {LOG_DIR}/best_model.pth")
                     self.net.train()
-
+                    '''
                     for name, module in self.net.named_modules():
                             if hasattr(module, 'weight') and module.weight is not None and hasattr(module.weight, "grad"):
                                 wandb.log({f"gradients/{name}.weight": wandb.Histogram(module.weight.grad.cpu().numpy())})
@@ -207,9 +210,9 @@ class Trainer:
                                 wandb.log({f"gradients/{name}.bias": wandb.Histogram(module.bias.grad.cpu().numpy())})
                            
 
-                    
+                    '''
                 
-            wandb.log({"Average Generator Loss": sum(epochloss) / len(epochloss)})
+            #wandb.log({"Average Generator Loss": sum(epochloss) / len(epochloss)})
             print(f"Epoch {epoch+1}/{EPOCH}, Average Generator Loss: {sum(epochloss) / len(epochloss)}")
 
 

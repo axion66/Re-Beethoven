@@ -1,3 +1,27 @@
+'''
+
+    DO NOT MODIFY THIS PAGE. 
+    DO NOT MODIFY THIS PAGE. 
+
+    DO NOT MODIFY THIS PAGE. 
+
+    DO NOT MODIFY THIS PAGE. 
+
+    DO NOT MODIFY THIS PAGE. 
+
+    DO NOT MODIFY THIS PAGE. 
+
+
+    DO NOT MODIFY THIS PAGE. 
+
+    DO NOT MODIFY THIS PAGE. 
+    DO NOT MODIFY THIS PAGE. 
+
+
+
+'''
+
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -213,7 +237,7 @@ class AudioAutoencoder(nn.Module):
         decoder=OobleckDecoder(),
         # chn increases 1 -> 128 -> 256 ... 2048 -> 32(VAE) -> 32(VAE) -> 2048 -> ... 1
         downsampling_ratio=2048,
-        sample_rate=8000,
+        sample_rate=16000,
         io_channels=1,
         bottleneck = AEBottleneck(),
         in_channels = 1,
@@ -245,8 +269,7 @@ class AudioAutoencoder(nn.Module):
 
     def encode(self, audio :torch.Tensor, return_info=False, **kwargs):
         info = {}
-        mean, std = audio.mean(dim = -1, keepdim = True), audio.std(dim = -1, keepdim = True)
-        audio = (audio - mean) / std
+        # don't even think of modifying this part.. it's already trained
         while (audio.dim() != 3):
             audio = audio.unsqueeze(1) if audio.dim() < 3 else audio.squeeze(1)
         latents = self.encoder(audio)
@@ -269,118 +292,6 @@ class AudioAutoencoder(nn.Module):
         return decoded
    
     
-
-'''
-class DiffusionAutoencoder(AudioAutoencoder):
-    def __init__(
-        self,
-        diffusion: ConditionedDiffusionModel,
-        diffusion_downsampling_ratio,
-        *args,
-        **kwargs
-    ):
-        super().__init__(*args, **kwargs)
-
-        self.diffusion = diffusion
-
-        self.min_length = self.downsampling_ratio * diffusion_downsampling_ratio
-
-        if self.encoder is not None:
-            # Shrink the initial encoder parameters to avoid saturated latents
-            with torch.no_grad():
-                for param in self.encoder.parameters():
-                    param *= 0.5
-
-    def decode(self, latents, steps=100):
-
-        upsampled_length = latents.shape[2] * self.downsampling_ratio
-
-        if self.bottleneck is not None:
-            latents = self.bottleneck.decode(latents)
-
-        if self.decoder is not None:
-            latents = self.decode(latents)
-    
-        # Upsample latents to match diffusion length
-        if latents.shape[2] != upsampled_length:
-            latents = F.interpolate(latents, size=upsampled_length, mode='nearest')
-
-        noise = torch.randn(latents.shape[0], self.io_channels, upsampled_length, device=latents.device)
-        decoded = sample(self.diffusion, noise, steps, 0, input_concat_cond=latents)
-
-        if self.pretransform is not None:
-            if self.pretransform.enable_grad:
-                decoded = self.pretransform.decode(decoded)
-            else:
-                with torch.no_grad():
-                    decoded = self.pretransform.decode(decoded)
-
-        return decoded
-    
-def create_diffAE_from_config(config: Dict[str, Any]):
-    
-    diffae_config = config["model"]
-
-    if "encoder" in diffae_config:
-        encoder = create_encoder_from_config(diffae_config["encoder"])
-    else:
-        encoder = None
-
-    if "decoder" in diffae_config:
-        decoder = create_decoder_from_config(diffae_config["decoder"])
-    else:
-        decoder = None
-
-    diffusion_model_type = diffae_config["diffusion"]["type"]
-
-    if diffusion_model_type == "DAU1d":
-        diffusion = DAU1DCondWrapper(**diffae_config["diffusion"]["config"])
-    elif diffusion_model_type == "adp_1d":
-        diffusion = UNet1DCondWrapper(**diffae_config["diffusion"]["config"])
-    elif diffusion_model_type == "dit":
-        diffusion = DiTWrapper(**diffae_config["diffusion"]["config"])
-
-    latent_dim = diffae_config.get("latent_dim", None)
-    assert latent_dim is not None, "latent_dim must be specified in model config"
-    downsampling_ratio = diffae_config.get("downsampling_ratio", None)
-    assert downsampling_ratio is not None, "downsampling_ratio must be specified in model config"
-    io_channels = diffae_config.get("io_channels", None)
-    assert io_channels is not None, "io_channels must be specified in model config"
-    sample_rate = config.get("sample_rate", None)
-    assert sample_rate is not None, "sample_rate must be specified in model config"
-
-    bottleneck = diffae_config.get("bottleneck", None)
-
-    pretransform = diffae_config.get("pretransform", None)
-
-    if pretransform is not None:
-        pretransform = create_pretransform_from_config(pretransform, sample_rate)
-
-    if bottleneck is not None:
-        bottleneck = create_bottleneck_from_config(bottleneck)
-
-    diffusion_downsampling_ratio = None,
-
-    if diffusion_model_type == "DAU1d":
-        diffusion_downsampling_ratio = np.prod(diffae_config["diffusion"]["config"]["strides"])
-    elif diffusion_model_type == "adp_1d":
-        diffusion_downsampling_ratio = np.prod(diffae_config["diffusion"]["config"]["factors"])
-    elif diffusion_model_type == "dit":
-        diffusion_downsampling_ratio = 1
-
-    return DiffusionAutoencoder(
-        encoder=encoder,
-        decoder=decoder,
-        diffusion=diffusion,
-        io_channels=io_channels,
-        sample_rate=sample_rate,
-        latent_dim=latent_dim,
-        downsampling_ratio=downsampling_ratio,
-        diffusion_downsampling_ratio=diffusion_downsampling_ratio,
-        bottleneck=bottleneck,
-        pretransform=pretransform
-    )
-'''
 
 
 class AutoEncoderWrapper(nn.Module):
@@ -417,7 +328,7 @@ class AutoEncoderWrapper(nn.Module):
     def decode(self, x):
         return self.ae.decode(x)
     
-    def encode_audio(self, audio, chunked=False, overlap=32, chunk_size=128, **kwargs):
+    def encode_audio(self, audio, chunked=True, overlap=32, chunk_size=128, **kwargs):
         '''
         Encode audios into latents. Audios should already be preprocesed by preprocess_audio_for_encoder.
         If chunked is True, split the audio into chunks of a given maximum size chunk_size, with given overlap.
@@ -431,14 +342,13 @@ class AutoEncoderWrapper(nn.Module):
         The chunk_size vs memory tradeoff isn't linear, and possibly depends on the GPU and CUDA version
         For example, on a A6000 chunk_size 128 is overall faster than 256 and 512 even though it has more chunks
         '''
-        audio = audio.unsqueeze(1)
+        assert audio.ndim == 3
         if not chunked:
-            # default behavior. Encode the entire audio in parallel
             return self.encode(audio)
         else:
             # CHUNKED ENCODING
             # samples_per_latent is just the downsampling ratio (which is also the upsampling ratio)
-            samples_per_latent = self.ae.downsampling_ratio
+            samples_per_latent = self.ae.downsampling_ratio 
             total_size = audio.shape[2] # in samples
             batch_size = audio.shape[0]
             chunk_size *= samples_per_latent # converting metric in latents to samples
@@ -454,41 +364,33 @@ class AutoEncoderWrapper(nn.Module):
                 chunks.append(chunk)
             chunks = torch.stack(chunks)
             num_chunks = chunks.shape[0]
-            # Note: y_size might be a different value from the latent length used in diffusion training
-            # because we can encode audio of varying lengths
-            # However, the audio should've been padded to a multiple of samples_per_latent by now.
             y_size = total_size // samples_per_latent
-            # Create an empty latent, we will populate it with chunks as we encode them
             y_final = torch.zeros((batch_size,self.ae.encoder.latent_dim,y_size)).to(audio.device)
+            print(f"y_final_encoder: {y_final.shape}")
             for i in range(num_chunks):
                 x_chunk = chunks[i,:]
-                # encode the chunk
                 y_chunk = self.encode(x_chunk)
-                # figure out where to put the audio along the time domain
+                print(f"y_chunk.shape {y_chunk.shape}")
                 if i == num_chunks-1:
-                    # final chunk always goes at the end
                     t_end = y_size
                     t_start = t_end - y_chunk.shape[2]
                 else:
                     t_start = i * hop_size // samples_per_latent
                     t_end = t_start + chunk_size // samples_per_latent
-                #  remove the edges of the overlaps
+
                 ol = overlap//samples_per_latent//2
                 chunk_start = 0
                 chunk_end = y_chunk.shape[2]
                 if i > 0:
-                    # no overlap for the start of the first chunk
                     t_start += ol
                     chunk_start += ol
                 if i < num_chunks-1:
-                    # no overlap for the end of the last chunk
                     t_end -= ol
                     chunk_end -= ol
-                # paste the chunked audio into our y_final output audio
                 y_final[:,:,t_start:t_end] = y_chunk[:,:,chunk_start:chunk_end]
             return y_final
     
-    def decode_audio(self, latents, chunked=False, overlap=32, chunk_size=128, **kwargs):
+    def decode_audio(self, latents, chunked=True, overlap=32, chunk_size=128, **kwargs):
         '''
         Decode latents to audio. 
         If chunked is True, split the latents into chunks of a given maximum size chunk_size, with given overlap, both of which are measured in number of latents. 
@@ -500,6 +402,10 @@ class AutoEncoderWrapper(nn.Module):
         The chunk_size vs memory tradeoff isn't linear, and possibly depends on the GPU and CUDA version
         For example, on a A6000 chunk_size 128 is overall faster than 256 and 512 even though it has more chunks
         '''
+        assert latents.ndim == 3
+        model_dtype = next(self.parameters()).dtype
+        latents = latents.to(model_dtype)
+
         if not chunked:
             # default behavior. Decode the entire latent in parallel
             return self.decode(latents)
@@ -522,11 +428,15 @@ class AutoEncoderWrapper(nn.Module):
             samples_per_latent = self.ae.downsampling_ratio
             # Create an empty waveform, we will populate it with chunks as decode them
             y_size = total_size * samples_per_latent
-            y_final = torch.zeros((batch_size,1,y_size)).to(latents.device)
+            y_final = torch.zeros((batch_size, 1 ,y_size)).to(latents.device)
+            print(f"y_final{y_final.shape}")
             for i in range(num_chunks):
                 x_chunk = chunks[i,:]
                 # decode the chunk
                 y_chunk = self.decode(x_chunk)
+                print(f"y_chunk : {y_chunk.shape}")
+                if y_chunk.ndim == 2:
+                    y_chunk = y_chunk.unsqueeze(1)
                 # figure out where to put the audio along the time domain
                 if i == num_chunks-1:
                     # final chunk always goes at the end
@@ -548,6 +458,7 @@ class AutoEncoderWrapper(nn.Module):
                     t_end -= ol
                     chunk_end -= ol
                 # paste the chunked audio into our y_final output audio
+                print(f"t_start: {t_start}, t_end: {t_end}, chunk_start: {chunk_start}, chunk_end: {chunk_end}")
                 y_final[:,:,t_start:t_end] = y_chunk[:,:,chunk_start:chunk_end]
             return y_final
 

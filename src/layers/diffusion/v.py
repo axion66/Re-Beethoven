@@ -41,7 +41,7 @@ class Denoiser(nn.Module):
         self.s_noise = s_noise
 
         self.rng = torch.quasirandom.SobolEngine(1, scramble=True) 
-        self.use_preencoded_audio = True if os.path.exists(preencoded_dir) else False
+        self.use_preencoded_audio = True if preencoded_dir is not None and os.path.exists(preencoded_dir) else False
         self.configure_loss()
     def configure_loss(self):
         self.mse = nn.MSELoss()
@@ -95,15 +95,17 @@ class Denoiser(nn.Module):
         noised_inputs = x * alphas + noise * sigmas
         targets = noise * alphas - x * sigmas
         out = self.model.forward_latent(noised_inputs, t)
-        return self.loss.loss_fn(out, targets)[0], latent_std, latent_mean, latent_std / 3.75
+        return self.mse(out, targets), latent_std, latent_mean, latent_std / 3.75
      
 
     @torch.no_grad()
     def sample(self, num_samples):
         """Draws samples from a model given starting noise. v-diffusion"""
-        x = torch.randn((num_samples, self.config['seq_len']), device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
-        x = self.model.autoencoder.encode_audio(x)
-        x = torch.randn_like(x) #self.randn_like(x, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")) * 0.04
+        x = torch.randn((num_samples, 128, 64), device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+        if not self.use_preencoded_audio:
+            x = torch.randn((num_samples, self.config['seq_len']), device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+            x = self.model.autoencoder.encode_audio(x)
+            x = torch.randn_like(x) #self.randn_like(x, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")) * 0.04
         steps = 50
         eta = 0  
         ts = x.new_ones([x.shape[0]])

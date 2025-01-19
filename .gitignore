@@ -1,16 +1,16 @@
-/src/models/*
+
 **/__pycache__/
-src/pretrained_models/
 models/*.pt
 models/*.pth
 /models/*.pt
 *.pt
 *.pth
 *.npz
+*.wav
+**/*.wav
+**/*.pt
+**/*.pth
 
-dataset/train_data
-dataset/train_labels
 src/wandb/
-src/train_log/
+stores/wandb
 
-audioset/*
