@@ -62,7 +62,7 @@ class Denoiser(nn.Module):
                 x = self.model.autoencoder.encode_audio(x)
             
         
-        x /= 3.75
+        x /= 0.182
         t = self.rng.draw(x.shape[0])[:, 0].to(self.device)
         alphas, sigmas = self.get_alphas_sigmas(t)
         alphas = alphas[:, None, None]
@@ -72,7 +72,7 @@ class Denoiser(nn.Module):
         v = self.model.forward_latent(noised_inputs, t.unsqueeze(-1))
         pred = x * alphas - v * sigmas
         
-        return self.model.autoencoder.decode_audio(pred * 3.75), t      
+        return self.model.autoencoder.decode_audio(pred * 0.182), t      
 
 
     def get_alphas_sigmas(self, t):
@@ -86,7 +86,7 @@ class Denoiser(nn.Module):
 
         latent_std = x.std()
         latent_mean = x.mean()
-        x /= 3.75
+        x /= 0.182
         t = self.rng.draw(x.shape[0])[:, 0].to(self.device) 
         alphas, sigmas = self.get_alphas_sigmas(t)
         alphas = alphas[:, None, None]
@@ -95,7 +95,7 @@ class Denoiser(nn.Module):
         noised_inputs = x * alphas + noise * sigmas
         targets = noise * alphas - x * sigmas
         out = self.model.forward_latent(noised_inputs, t)
-        return self.mse(out, targets), latent_std, latent_mean, latent_std / 3.75
+        return self.mse(out, targets), latent_std, latent_mean, latent_std / 0.182
      
 
     @torch.no_grad()
@@ -142,6 +142,6 @@ class Denoiser(nn.Module):
 
     
         # If we are on the last timestep, output the denoised image
-        return self.model.autoencoder.decode_audio(pred * 3.75).float() 
+        return self.model.autoencoder.decode_audio(pred * 0.182).float() 
 
     

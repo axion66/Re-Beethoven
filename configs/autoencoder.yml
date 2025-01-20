@@ -26,7 +26,7 @@ model:
   freeze_encoder: False
   freeze_decoder: False
 file:
-  audio_folder: "dataset/"
+  audio_folder: "datasets/dataset"
   log_dir: "stores/"
   project_name: "Autoencoder"
   run_name: "Beta-Autoencoder"

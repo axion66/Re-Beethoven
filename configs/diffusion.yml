@@ -2,7 +2,7 @@ fft:
   n_fft: 512
   win_len: 512
   hop_length: 256
-  seq_len: 262144
+  seq_len: 524288
   overlap_ratio: 8
   cut_first: 4000
   sr: 16000
@@ -13,24 +13,24 @@ fft:
   num_evaluation: 8
   downsampling_ratio: 2048
   num_heads: 8
-  embed_dim: 512
+  embed_dim: 1024
 model:
   epoch: 1000
-  batch_size: 24
+  batch_size: 16
   lr: 0.00008
   warmup_period: 4000
   num_workers: 60
-  evaluation_cycle: 1024
+  evaluation_cycle: 252
   num_samples: 8
   pretrained_autoencoder: "models/autoencoder/last.pth"
   freeze_encoder: True
   freeze_decoder: True
   resume_diffusion: False
   resume_diffusion_path: ""
-  train_precompute: True
-  use_precomputed: "dataset_latent/"
+  train_precompute: False
+  use_precompute: "datasets/dataset_latent"
 file:
-  audio_folder: "dataset"
+  audio_folder: "datasets/dataset"
   log_dir: "stores/"
   project_name: "DiT"
   run_name: "Beta-DiT"

@@ -24,7 +24,7 @@ class DiT(nn.Module):
         self.autoencoder = pretrained_autoencoder
         self.autoencoder.requires_grad_(False)
         
-        _, self.latents_dim, self.seq_len = self.autoencoder.get_latents_shape(example=torch.ones(1, config['seq_len']))
+        _, self.latents_dim, self.seq_len = self.autoencoder.get_latents_shape(example=torch.ones(1, 1, config['seq_len']))
         
         self.embed_dim = config['embed_dim']       
                                                        
