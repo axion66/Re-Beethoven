@@ -120,9 +120,10 @@ class Trainer:
         ).to(self.device)
 
         if (self.MODEL_CFG['resume_diffusion']):
+            print("Resume DiT, re-loadd autoencoder...")
             state = torch.load(self.MODEL_CFG['resume_diffusion_path'])
             self.denoiser.load_state_dict(state, strict = True)
-            
+            self.autoencoder = self.denoiser.model.autoencoder
         print_model_size("Autoencoder", self.autoencoder)
         print_model_size("DiT", self.dit)
         print_model_size("Denoiser", self.denoiser)

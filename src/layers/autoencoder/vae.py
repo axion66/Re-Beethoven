@@ -302,7 +302,7 @@ class AutoEncoderWrapper(nn.Module):
         ):
         super().__init__()
         self.ae = autoencoder  
-        if (autoencoder_state_path is not None):
+        if (autoencoder_state_path is not None and isinstance(autoencoder_state_path, str)):
             if torch.cuda.is_available():
                 print("Loaded Pretrained autoencoder. (CUDA)")
                 self.ae.load_state_dict(torch.load(autoencoder_state_path))
